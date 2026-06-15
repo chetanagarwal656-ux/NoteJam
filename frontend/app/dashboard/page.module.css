@@ -843,11 +843,6 @@
     size: auto;
   }
   
-  html, body {
-    -webkit-print-color-adjust: exact !important;
-    print-color-adjust: exact !important;
-  }
-  
   .appLayout {
     display: block !important;
     overflow: visible !important;
