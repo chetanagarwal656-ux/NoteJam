@@ -1,0 +1,57 @@
+# Dependencies
+node_modules/
+frontend/node_modules/
+backend/venv/
+venv/
+
+# Build output
+.next/
+frontend/.next/
+out/
+build/
+dist/
+
+# Environment variables and secrets
+.env
+.env.*
+frontend/.env
+frontend/.env.*
+backend/.env
+backend/.env.*
+!.env.example
+!frontend/.env.example
+!backend/.env.example
+
+# Local database and generated files
+*.db
+notejam.db
+backend/notejam.db
+backend/temp/
+backend/static/
+backend/*.mp3
+backend/*.wav
+backend/raw_text_dump.txt
+temp/
+static/
+tmp/
+tmp-flip-detail/
+tmp-flip-frames/
+frontend/lint_output.txt
+
+# Logs and caches
+*.log
+*.err
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Hosting metadata
+.vercel/
