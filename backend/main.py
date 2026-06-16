@@ -18,6 +18,7 @@ import yt_dlp
 from dotenv import load_dotenv
 import sqlite3
 from datetime import datetime
+from contextlib import asynccontextmanager
 
 load_dotenv()
 
@@ -48,9 +49,12 @@ def init_db():
     conn.commit()
     conn.close()
 
-init_db()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_db()
+    yield
 
-app = FastAPI(title="AI Lecture Notes Generator API")
+app = FastAPI(title="AI Lecture Notes Generator API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -220,7 +224,8 @@ async def process_lecture(
     video_path = ""
     
     if file:
-        video_path = os.path.join("temp", f"{uuid.uuid4()}_{file.filename}")
+        safe_filename = os.path.basename(file.filename) if file.filename else "upload.mp4"
+        video_path = os.path.join("temp", f"{uuid.uuid4()}_{safe_filename}")
         with open(video_path, "wb") as buffer:
             buffer.write(await file.read())
     elif url:
@@ -252,6 +257,8 @@ async def process_lecture(
             except Exception as fallback_e:
                 if os.path.exists(video_path):
                     os.remove(video_path)
+                if "Label" in str(fallback_e) or "Label" in repr(fallback_e):
+                    raise HTTPException(status_code=500, detail="Please RESTART your Python backend server terminal! It is still using the old code in its memory.")
                 raise HTTPException(status_code=400, detail=f"Failed to download video: {str(fallback_e)}")
             
     if not os.path.exists(video_path):
@@ -262,7 +269,11 @@ async def process_lecture(
         return result
     except Exception as e:
         print(f"Error processing video: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        import traceback
+        traceback.print_exc()
+        if "Label" in str(e) or "Label" in repr(e):
+            raise HTTPException(status_code=500, detail="Please RESTART your Python backend server terminal! It is still using the old code in its memory.")
+        raise HTTPException(status_code=500, detail=f"Failed to generate notes: {str(e)}")
     finally:
         if os.path.exists(video_path):
             os.remove(video_path)

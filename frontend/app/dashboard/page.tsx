@@ -88,10 +88,15 @@ const wrapSvgText = (text: string, maxChars: number) => {
 const Mermaid = ({ chart, noteTheme, isHandwritten }: { chart: string; noteTheme: "dark" | "light"; isHandwritten: boolean }) => {
   const paperMode = noteTheme === "light" || isHandwritten;
   const [svg, setSvg] = useState<string>('');
-  const id = useRef(`mermaid-${Math.random().toString(36).substr(2, 9)}`);
+  const [id, setId] = useState<string>('');
+
+  useEffect(() => {
+    setId(`mermaid-${Math.random().toString(36).substr(2, 9)}`);
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
+    if (!id) return;
     const mermaidTheme = paperMode
       ? {
           background: '#fbfdff',
@@ -166,7 +171,9 @@ const Mermaid = ({ chart, noteTheme, isHandwritten }: { chart: string; noteTheme
     renderDiagram();
 
     return () => { isMounted = false; };
-  }, [chart, paperMode]);
+  }, [chart, paperMode, id]);
+
+  if (!id) return null;
 
   return (
     <div
@@ -2056,6 +2063,7 @@ const NoteApp = () => {
 // --- MAIN PARENT COMPONENT ---
 export default function HomeApp() {
   const [mounted, setMounted] = useState(false);
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => setMounted(true), []);
   if (!mounted) return null;
   return <NoteApp />;
