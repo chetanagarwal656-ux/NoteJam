@@ -147,14 +147,14 @@ const Mermaid = ({ chart, noteTheme, isHandwritten }: { chart: string; noteTheme
         // Validate syntax FIRST to prevent Mermaid from polluting the DOM with error SVGs
         await mermaid.parse(safeChart);
 
-        const { svg: resultSvg } = await mermaid.render(id.current, safeChart);
+        const { svg: resultSvg } = await mermaid.render(id, safeChart);
         if (isMounted) setSvg(resultSvg);
       } catch (err) {
         console.error("Mermaid syntax error:", err);
         // Clean up any rogue error SVGs that mermaid.render might have injected into the body
-        const rogueElement = document.getElementById(id.current);
+        const rogueElement = document.getElementById(id);
         if (rogueElement) rogueElement.remove();
-        const errorElement = document.getElementById("error-" + id.current);
+        const errorElement = document.getElementById("error-" + id);
         if (errorElement) errorElement.remove();
         
         // Also wipe out any general d-mermaid error boxes appended to the body
