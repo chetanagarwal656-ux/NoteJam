@@ -81,13 +81,13 @@ Do not output a raw transcript. Analyze the video, extract the core concepts, an
 
 CRITICAL INSTRUCTIONS FOR THE "markdown" FIELD:
 - FORMATTING: Use **Bold** for keywords, *Italics* for definitions, and blockquotes for takeaways. Structure perfectly with #, ##, ###.
-- MIND MAP: The VERY LAST thing in the markdown string MUST be a Mermaid.js diagram (wrapped in ```mermaid blocks) visualizing the hierarchy and connections of the core concepts taught in the lecture. It MUST be placed at the end of the document.
-  * CRITICAL MERMAID RULES: Use `graph TD`. You MUST strictly follow the syntax `NodeID["Visible Label"]`. The NodeID must be contiguous alphanumeric characters only (NO SPACES). The visible label MUST be wrapped in double quotes to allow special characters!
-  * CORRECT EXAMPLE: `A["Control Systems (Linear)"] --> B["PID Controllers"]`
-  * INCORRECT EXAMPLE: `A[Control Systems] --> B(PID Controllers)` (Do not do this!)
+- MIND MAP: The VERY LAST thing in the markdown string MUST be a Mermaid.js diagram (wrapped in mermaid blocks) visualizing the hierarchy and connections of the core concepts taught in the lecture. It MUST be placed at the end of the document.
+  * CRITICAL MERMAID RULES: Use graph TD. You MUST strictly follow the syntax NodeID["Visible Label"]. The NodeID must be contiguous alphanumeric characters only (NO SPACES). The visible label MUST be wrapped in double quotes to allow special characters!
+  * CORRECT EXAMPLE: A["Control Systems (Linear)"] --> B["PID Controllers"]
+  * INCORRECT EXAMPLE: A[Control Systems] --> B(PID Controllers) (Do not do this!)
 - VISUALS: If a frame contains a diagram, graph, mathematical equation, or chemical structure, but the professor is physically blocking it or it is blurry, YOU MUST recreate it yourself using highly detailed Markdown Tables, LaTeX matrices, or structured text.
-- MATH: Use LaTeX strictly. Inline: `$E = mc^2$`. Block: `$$...$$`.
-- VIDEO SYNC: Heavily inject exact timestamp tags `[MM:SS]` throughout the text whenever you explain a new concept, so the user can click them to sync the video.
+- MATH: Use LaTeX strictly. Inline: $E = mc^2$. Block: $$...$$. DO NOT wrap math in backticks! If you use backticks around math, it will break the LaTeX renderer.
+- VIDEO SYNC: Heavily inject exact timestamp tags [MM:SS] throughout the text whenever you explain a new concept, so the user can click them to sync the video. DO NOT wrap timestamps in backticks!
 - FRAME EXTRACTION: YOU MUST extract at least 2 frames! When the teacher writes an important formula or draws a diagram, exactly insert: [EXTRACT_FRAME_AT_MM:SS] (e.g. [EXTRACT_FRAME_AT_01:23]). Do NOT skip this step!
 
 LANGUAGE:
