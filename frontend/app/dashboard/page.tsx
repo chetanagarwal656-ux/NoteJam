@@ -139,12 +139,27 @@ const Mermaid = ({ chart, noteTheme, isHandwritten }: { chart: string; noteTheme
         if (safeChart.endsWith('```')) safeChart = safeChart.slice(0, -3);
         safeChart = safeChart.trim();
 
+        // Validate syntax FIRST to prevent Mermaid from polluting the DOM with error SVGs
+        await mermaid.parse(safeChart);
+
         const { svg: resultSvg } = await mermaid.render(id.current, safeChart);
         if (isMounted) setSvg(resultSvg);
       } catch (err) {
         console.error("Mermaid syntax error:", err);
+        // Clean up any rogue error SVGs that mermaid.render might have injected into the body
+        const rogueElement = document.getElementById(id.current);
+        if (rogueElement) rogueElement.remove();
+        const errorElement = document.getElementById("error-" + id.current);
+        if (errorElement) errorElement.remove();
+        
+        // Also wipe out any general d-mermaid error boxes appended to the body
+        document.querySelectorAll('svg[id^="dmermaid"]').forEach(el => el.remove());
+        document.querySelectorAll('svg[id^="mermaid"]').forEach(el => {
+          if (el.innerHTML.includes('Syntax error')) el.remove();
+        });
+
         // Provide a graceful fallback instead of a giant syntax error
-        if (isMounted) setSvg(`<div style="color:#ef4444; padding:1rem; border:1px solid #ef4444; border-radius:8px; text-align:center;">Failed to render diagram. The AI generated invalid Mermaid syntax.</div>`);
+        if (isMounted) setSvg(`<div style="color:#ef4444; padding:1rem; border:1px solid #ef4444; border-radius:8px; text-align:center; font-size: 0.9rem;"><b>Diagram Generation Failed</b><br/>The AI generated invalid Mermaid syntax.</div>`);
       }
     };
 
