@@ -87,8 +87,11 @@ const wrapSvgText = (text: string, maxChars: number) => {
 // Mermaid Component
 const Mermaid = ({ chart, noteTheme, isHandwritten }: { chart: string; noteTheme: "dark" | "light"; isHandwritten: boolean }) => {
   const paperMode = noteTheme === "light" || isHandwritten;
+  const [svg, setSvg] = useState<string>('');
+  const id = useRef(`mermaid-${Math.random().toString(36).substr(2, 9)}`);
 
   useEffect(() => {
+    let isMounted = true;
     const mermaidTheme = paperMode
       ? {
           background: '#fbfdff',
@@ -117,25 +120,44 @@ const Mermaid = ({ chart, noteTheme, isHandwritten }: { chart: string; noteTheme
           lineColor: '#e5e7eb',
         };
 
-    mermaid.initialize({ 
-      startOnLoad: true, 
-      theme: 'base',
-      themeVariables: {
-        ...mermaidTheme,
-        fontFamily: 'inherit',
-        fontSize: '16px'
+    const renderDiagram = async () => {
+      try {
+        mermaid.initialize({ 
+          startOnLoad: false, 
+          theme: 'base',
+          themeVariables: {
+            ...mermaidTheme,
+            fontFamily: 'inherit',
+            fontSize: '16px'
+          }
+        });
+        
+        // Sanitize chart by removing extra backticks or language tags that AI might leak
+        let safeChart = chart.trim();
+        if (safeChart.startsWith('```mermaid')) safeChart = safeChart.replace('```mermaid', '');
+        if (safeChart.startsWith('```')) safeChart = safeChart.replace('```', '');
+        if (safeChart.endsWith('```')) safeChart = safeChart.slice(0, -3);
+        safeChart = safeChart.trim();
+
+        const { svg: resultSvg } = await mermaid.render(id.current, safeChart);
+        if (isMounted) setSvg(resultSvg);
+      } catch (err) {
+        console.error("Mermaid syntax error:", err);
+        // Provide a graceful fallback instead of a giant syntax error
+        if (isMounted) setSvg(`<div style="color:#ef4444; padding:1rem; border:1px solid #ef4444; border-radius:8px; text-align:center;">Failed to render diagram. The AI generated invalid Mermaid syntax.</div>`);
       }
-    });
-    mermaid.contentLoaded();
+    };
+
+    renderDiagram();
+
+    return () => { isMounted = false; };
   }, [chart, paperMode]);
 
   return (
     <div
-      key={`${noteTheme}-${isHandwritten ? 'handwritten' : 'typed'}-${chart}`}
-      className={`mermaid ${styles.mermaidDiagram} ${paperMode ? styles.mermaidPaper : styles.mermaidDark}`}
-    >
-      {chart}
-    </div>
+      className={`${styles.mermaidDiagram} ${paperMode ? styles.mermaidPaper : styles.mermaidDark}`}
+      dangerouslySetInnerHTML={{ __html: svg || '<div style="opacity:0.5; padding: 2rem; text-align:center;">Rendering diagram...</div>' }}
+    />
   );
 };
 
@@ -2018,5 +2040,8 @@ const NoteApp = () => {
 
 // --- MAIN PARENT COMPONENT ---
 export default function HomeApp() {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  if (!mounted) return null;
   return <NoteApp />;
 }
