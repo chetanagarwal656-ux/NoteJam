@@ -233,16 +233,26 @@ async def process_lecture(
             'nocheckcertificate': True,
             'retries': 10,
             'fragment_retries': 10,
-            'socket_timeout': 30
+            'socket_timeout': 30,
+            # Pass cookies to bypass YouTube bot detection
+            'cookiesfrombrowser': ('chrome',), 
         }
-        print(f"Downloading from URL: {url}")
         try:
+            print(f"Downloading from URL (with Chrome cookies): {url}")
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([url])
         except Exception as e:
-            if os.path.exists(video_path):
-                os.remove(video_path)
-            raise HTTPException(status_code=400, detail=f"Failed to download video: {str(e)}")
+            print(f"Failed with cookies, trying without... {e}")
+            ydl_opts_fallback = ydl_opts.copy()
+            ydl_opts_fallback.pop('cookiesfrombrowser', None)
+            try:
+                print(f"Downloading from URL (without cookies): {url}")
+                with yt_dlp.YoutubeDL(ydl_opts_fallback) as ydl:
+                    ydl.download([url])
+            except Exception as fallback_e:
+                if os.path.exists(video_path):
+                    os.remove(video_path)
+                raise HTTPException(status_code=400, detail=f"Failed to download video: {str(fallback_e)}")
             
     if not os.path.exists(video_path):
         raise HTTPException(status_code=500, detail="Failed to acquire video.")
