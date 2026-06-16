@@ -134,13 +134,36 @@ def robust_gemini_call(contents, model='gemini-2.5-flash', is_json=False):
                     time.sleep(65)
                 else:
                     raise Exception("You have hit the Google Gemini API rate limit or quota limit. Please wait a few minutes and try again.")
+            elif "10054" in err_str or "connection" in err_str or "timeout" in err_str or "forcibly closed" in err_str:
+                if attempt < max_retries - 1:
+                    print(f"Network connection error ({err_str}). Retrying in 5 seconds... (Attempt {attempt+1}/{max_retries})")
+                    time.sleep(5)
+                else:
+                    raise Exception("Network connection to Gemini API failed repeatedly. Please check your internet connection and try again.")
             else:
-                raise e
+                if attempt < max_retries - 1:
+                    print(f"Unexpected error ({err_str}). Retrying in 3 seconds... (Attempt {attempt+1}/{max_retries})")
+                    time.sleep(3)
+                else:
+                    raise e
     raise Exception("Failed to generate content after retries.")
 
+def robust_file_upload(video_path: str):
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            print(f"Uploading video to Gemini (Attempt {attempt+1}/{max_retries})...")
+            return client.files.upload(file=video_path)
+        except Exception as e:
+            err_str = str(e).lower()
+            if attempt < max_retries - 1:
+                print(f"Upload failed ({err_str}). Retrying in 5 seconds...")
+                time.sleep(5)
+            else:
+                raise Exception("Failed to upload video to Gemini API after multiple attempts. The connection was forcibly closed.")
+
 def process_video_and_generate_notes(video_path: str, language: str = "English") -> dict:
-    print("Uploading video to Gemini...")
-    uploaded_file = client.files.upload(file=video_path)
+    uploaded_file = robust_file_upload(video_path)
     assert uploaded_file is not None
     assert uploaded_file.name is not None
     assert uploaded_file.state is not None
