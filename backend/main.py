@@ -116,7 +116,34 @@ Translate and write the markdown notes entirely in the requested language: {lang
 Ensure the notes read like a premium study guide!
 """
 
+MERGE_CHUNK_NOTES_PROMPT = """
+You are Note Jam, an elite AI teaching assistant.
+You will receive notes generated from consecutive 25-minute video chunks of the same lecture.
+
+Your task is to merge them into one polished, coherent, premium study guide.
+
+CRITICAL INSTRUCTIONS:
+- Preserve lecture-grounded details from every chunk.
+- Remove duplicated explanations caused by chunk boundaries.
+- Keep the original learning order of the lecture.
+- Keep important timestamps when available.
+- Keep image markdown links when they appear in the chunk notes.
+- Do not invent content that is not present in the chunk notes.
+- Use #, ##, and ### headings.
+- Use **Bold** for key terms, *Italics* for definitions, blockquotes for takeaways, and LaTeX for formulas.
+- The VERY LAST thing in the markdown string MUST be a Mermaid.js diagram wrapped in ```mermaid blocks.
+- For Mermaid, use `graph TD` and keep visible node text simple and alphanumeric.
+
+LANGUAGE:
+Write the final notes entirely in the requested language: {language}.
+
+Chunk notes:
+{chunk_notes}
+"""
+
 import imageio_ffmpeg
+
+CHUNK_SECONDS = 25 * 60
 
 class TokenLimitExceeded(Exception):
     pass
@@ -190,6 +217,100 @@ def extract_audio_track(video_path: str) -> str:
     subprocess.run(command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     return audio_path
 
+def get_media_duration_seconds(media_path: str) -> float:
+    ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+    command = [ffmpeg_exe, "-i", media_path]
+    result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    output = result.stderr.decode(errors="ignore")
+    match = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", output)
+    if not match:
+        raise ValueError("Could not determine video duration for chunking.")
+    hours, minutes, seconds = match.groups()
+    return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
+
+def split_video_into_chunks(video_path: str, chunk_seconds: int = CHUNK_SECONDS) -> list[str]:
+    duration = get_media_duration_seconds(video_path)
+    chunk_paths: list[str] = []
+    ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+    total_chunks = max(1, int((duration + chunk_seconds - 1) // chunk_seconds))
+
+    for index in range(total_chunks):
+        start = index * chunk_seconds
+        chunk_path = os.path.join("temp", f"chunk_{uuid.uuid4().hex[:8]}_{index + 1}.mp4")
+        command = [
+            ffmpeg_exe,
+            "-ss", str(start),
+            "-t", str(chunk_seconds),
+            "-i", video_path,
+            "-vf", "scale='min(854,iw)':-2",
+            "-c:v", "libx264",
+            "-preset", "veryfast",
+            "-crf", "35",
+            "-c:a", "aac",
+            "-b:a", "64k",
+            "-movflags", "+faststart",
+            chunk_path,
+            "-y"
+        ]
+        try:
+            subprocess.run(command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        except subprocess.CalledProcessError:
+            fallback_command = [
+                ffmpeg_exe,
+                "-ss", str(start),
+                "-t", str(chunk_seconds),
+                "-i", video_path,
+                "-c", "copy",
+                chunk_path,
+                "-y"
+            ]
+            subprocess.run(fallback_command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        chunk_paths.append(chunk_path)
+
+    return chunk_paths
+
+def merge_chunk_notes(chunk_notes: list[str], language: str) -> str:
+    combined_notes = "\n\n---\n\n".join(chunk_notes)
+    return robust_gemini_call(
+        contents=[MERGE_CHUNK_NOTES_PROMPT.format(language=language, chunk_notes=combined_notes)],
+        is_json=False
+    )
+
+def process_chunked_video_and_generate_notes(video_path: str, language: str = "English") -> dict:
+    print("Processing video in 25-minute chunks.")
+    chunk_paths: list[str] = []
+    audio_paths: list[str] = []
+    try:
+        chunk_paths = split_video_into_chunks(video_path)
+        chunk_notes: list[str] = []
+
+        for index, chunk_path in enumerate(chunk_paths):
+            start_minute = index * 25
+            end_minute = start_minute + 25
+            chunk_label = f"Lecture chunk {index + 1} approximately {start_minute:02d}:00 to {end_minute:02d}:00"
+            try:
+                result = process_media_and_generate_notes(chunk_path, language, visual_mode=True)
+            except TokenLimitExceeded:
+                print(f"{chunk_label} exceeded visual token limit. Retrying this chunk as compressed audio.")
+                audio_path = extract_audio_track(chunk_path)
+                audio_paths.append(audio_path)
+                result = process_media_and_generate_notes(audio_path, language, visual_mode=False)
+
+            chunk_notes.append(f"## {chunk_label}\n\n{result['markdown']}")
+
+        merged_notes = merge_chunk_notes(chunk_notes, language)
+        return {
+            "markdown": (
+                "> NoteJam processed this lecture in 25-minute video chunks because the full video exceeded the AI visual context limit. "
+                "Each chunk was analyzed separately and then merged into one revision-ready note.\n\n"
+                + merged_notes
+            )
+        }
+    finally:
+        for path in [*chunk_paths, *audio_paths]:
+            if path and os.path.exists(path):
+                os.remove(path)
+
 def process_media_and_generate_notes(media_path: str, language: str = "English", visual_mode: bool = True) -> dict:
     print("Uploading media to Gemini...")
     uploaded_file = client.files.upload(file=media_path)
@@ -242,25 +363,14 @@ def process_video_and_generate_notes(video_path: str, language: str = "English")
     try:
         return process_media_and_generate_notes(video_path, language, visual_mode=True)
     except TokenLimitExceeded:
-        print("Video exceeded Gemini token limit. Falling back to compressed audio-only processing.")
-        audio_path = ""
+        print("Video exceeded Gemini token limit. Falling back to 25-minute chunked video processing.")
         try:
-            audio_path = extract_audio_track(video_path)
-            result = process_media_and_generate_notes(audio_path, language, visual_mode=False)
-            result["markdown"] = (
-                "> NoteJam processed this long lecture in audio-only mode because the full video exceeded the AI visual context limit. "
-                "The notes are grounded in the professor's spoken explanation.\n\n"
-                + result["markdown"]
-            )
-            return result
+            return process_chunked_video_and_generate_notes(video_path, language)
         except TokenLimitExceeded as e:
             raise HTTPException(
                 status_code=413,
-                detail="This lecture is too long to process in one pass. Please try a shorter lecture segment or upload a trimmed part of the video."
+                detail="This lecture is too dense to process even in 25-minute chunks. Please try a shorter lecture segment or upload a trimmed part of the video."
             ) from e
-        finally:
-            if audio_path and os.path.exists(audio_path):
-                os.remove(audio_path)
 
 @app.post("/process")
 async def process_lecture(
