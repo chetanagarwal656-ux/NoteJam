@@ -87,16 +87,8 @@ const wrapSvgText = (text: string, maxChars: number) => {
 // Mermaid Component
 const Mermaid = ({ chart, noteTheme, isHandwritten }: { chart: string; noteTheme: "dark" | "light"; isHandwritten: boolean }) => {
   const paperMode = noteTheme === "light" || isHandwritten;
-  const [svg, setSvg] = useState<string>('');
-  const [id, setId] = useState<string>('');
 
   useEffect(() => {
-    setId(`mermaid-${Math.random().toString(36).substr(2, 9)}`);
-  }, []);
-
-  useEffect(() => {
-    let isMounted = true;
-    if (!id) return;
     const mermaidTheme = paperMode
       ? {
           background: '#fbfdff',
@@ -125,61 +117,25 @@ const Mermaid = ({ chart, noteTheme, isHandwritten }: { chart: string; noteTheme
           lineColor: '#e5e7eb',
         };
 
-    const renderDiagram = async () => {
-      try {
-        mermaid.initialize({ 
-          startOnLoad: false, 
-          theme: 'base',
-          themeVariables: {
-            ...mermaidTheme,
-            fontFamily: 'inherit',
-            fontSize: '16px'
-          }
-        });
-        
-        // Sanitize chart by removing extra backticks or language tags that AI might leak
-        let safeChart = chart.trim();
-        if (safeChart.startsWith('```mermaid')) safeChart = safeChart.replace('```mermaid', '');
-        if (safeChart.startsWith('```')) safeChart = safeChart.replace('```', '');
-        if (safeChart.endsWith('```')) safeChart = safeChart.slice(0, -3);
-        safeChart = safeChart.trim();
-
-        // Validate syntax FIRST to prevent Mermaid from polluting the DOM with error SVGs
-        await mermaid.parse(safeChart);
-
-        const { svg: resultSvg } = await mermaid.render(id, safeChart);
-        if (isMounted) setSvg(resultSvg);
-      } catch (err) {
-        console.error("Mermaid syntax error:", err);
-        // Clean up any rogue error SVGs that mermaid.render might have injected into the body
-        const rogueElement = document.getElementById(id);
-        if (rogueElement) rogueElement.remove();
-        const errorElement = document.getElementById("error-" + id);
-        if (errorElement) errorElement.remove();
-        
-        // Also wipe out any general d-mermaid error boxes appended to the body
-        document.querySelectorAll('svg[id^="dmermaid"]').forEach(el => el.remove());
-        document.querySelectorAll('svg[id^="mermaid"]').forEach(el => {
-          if (el.innerHTML.includes('Syntax error')) el.remove();
-        });
-
-        // Provide a graceful fallback instead of a giant syntax error
-        if (isMounted) setSvg(`<div style="color:#ef4444; padding:1rem; border:1px solid #ef4444; border-radius:8px; text-align:center; font-size: 0.9rem;"><b>Diagram Generation Failed</b><br/>The AI generated invalid Mermaid syntax.</div>`);
+    mermaid.initialize({ 
+      startOnLoad: true, 
+      theme: 'base',
+      themeVariables: {
+        ...mermaidTheme,
+        fontFamily: 'inherit',
+        fontSize: '16px'
       }
-    };
-
-    renderDiagram();
-
-    return () => { isMounted = false; };
-  }, [chart, paperMode, id]);
-
-  if (!id) return null;
+    });
+    mermaid.contentLoaded();
+  }, [chart, paperMode]);
 
   return (
     <div
-      className={`${styles.mermaidDiagram} ${paperMode ? styles.mermaidPaper : styles.mermaidDark}`}
-      dangerouslySetInnerHTML={{ __html: svg || '<div style="opacity:0.5; padding: 2rem; text-align:center;">Rendering diagram...</div>' }}
-    />
+      key={`${noteTheme}-${isHandwritten ? 'handwritten' : 'typed'}-${chart}`}
+      className={`mermaid ${styles.mermaidDiagram} ${paperMode ? styles.mermaidPaper : styles.mermaidDark}`}
+    >
+      {chart}
+    </div>
   );
 };
 
@@ -2062,9 +2018,5 @@ const NoteApp = () => {
 
 // --- MAIN PARENT COMPONENT ---
 export default function HomeApp() {
-  const [mounted, setMounted] = useState(false);
-  // eslint-disable-next-line react-hooks/set-state-in-effect
-  useEffect(() => setMounted(true), []);
-  if (!mounted) return null;
   return <NoteApp />;
 }

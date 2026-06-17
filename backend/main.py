@@ -18,7 +18,6 @@ import yt_dlp
 from dotenv import load_dotenv
 import sqlite3
 from datetime import datetime
-from contextlib import asynccontextmanager
 
 load_dotenv()
 
@@ -49,12 +48,9 @@ def init_db():
     conn.commit()
     conn.close()
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    init_db()
-    yield
+init_db()
 
-app = FastAPI(title="AI Lecture Notes Generator API", lifespan=lifespan)
+app = FastAPI(title="AI Lecture Notes Generator API")
 
 app.add_middleware(
     CORSMiddleware,
@@ -86,13 +82,10 @@ Do not output a raw transcript. Analyze the video, extract the core concepts, an
 CRITICAL INSTRUCTIONS FOR THE "markdown" FIELD:
 - FORMATTING: Use **Bold** for keywords, *Italics* for definitions, and blockquotes for takeaways. Structure perfectly with #, ##, ###.
 - MIND MAP: The VERY LAST thing in the markdown string MUST be a Mermaid.js diagram (wrapped in ```mermaid blocks) visualizing the hierarchy and connections of the core concepts taught in the lecture. It MUST be placed at the end of the document.
-  * CRITICAL MERMAID RULES: Use graph TD. You MUST strictly follow the syntax NodeID["Visible Label"]. The NodeID must be contiguous alphanumeric characters only (NO SPACES). The visible label MUST be wrapped in double quotes to allow special characters!
-  * DO NOT use diamond shapes `B1{Label}`. DO NOT use parentheses `B(Label)`. DO NOT use brackets `B[Label]`. YOU MUST ONLY use double quotes `NodeID["Label"]`.
-  * CORRECT EXAMPLE: A["Control Systems (Linear)"] --> B["PID Controllers"]
-  * INCORRECT EXAMPLE: A[Control Systems] --> B(PID Controllers) (Do not do this!)
+  * CRITICAL MERMAID RULES: Use `graph TD`. You MUST NOT use parentheses `()`, brackets `[]`, braces `{{}}`, or quotes `"` inside the visible node text. Keep node names extremely simple and alphanumeric only! (Example: `A[Control Systems] --> B[PID Controllers]`). Failure to follow this will break the renderer.
 - VISUALS: If a frame contains a diagram, graph, mathematical equation, or chemical structure, but the professor is physically blocking it or it is blurry, YOU MUST recreate it yourself using highly detailed Markdown Tables, LaTeX matrices, or structured text.
-- MATH: Use LaTeX strictly. Inline: $E = mc^2$. Block: $$...$$. DO NOT wrap math in backticks! If you use backticks around math, it will break the LaTeX renderer.
-- VIDEO SYNC: Heavily inject exact timestamp tags [MM:SS] throughout the text whenever you explain a new concept, so the user can click them to sync the video. DO NOT wrap timestamps in backticks!
+- MATH: Use LaTeX strictly. Inline: `$E = mc^2$`. Block: `$$...$$`.
+- VIDEO SYNC: Heavily inject exact timestamp tags `[MM:SS]` throughout the text whenever you explain a new concept, so the user can click them to sync the video.
 - FRAME EXTRACTION: YOU MUST extract at least 2 frames! When the teacher writes an important formula or draws a diagram, exactly insert: [EXTRACT_FRAME_AT_MM:SS] (e.g. [EXTRACT_FRAME_AT_01:23]). Do NOT skip this step!
 
 LANGUAGE:
@@ -100,7 +93,41 @@ Translate and write BOTH the markdown notes and the `<cheatsheet>` entirely in t
 Ensure the notes read like a premium study guide!
 """
 
+AUDIO_SYSTEM_PROMPT = """
+You are Note Jam, an elite AI teaching assistant.
+You will receive the audio track of a lecture or tutorial.
+Your task is to convert this lecture audio into beautifully structured, comprehensive, and highly readable Markdown notes.
+
+The original video was too long to process visually, so focus on everything clearly taught or explained by the professor.
+Do not hallucinate diagrams or board content that is not present in the audio.
+
+CRITICAL INSTRUCTIONS:
+- Do not output a raw transcript. Analyze the lecture and structure the concepts logically.
+- Preserve all important definitions, examples, steps, formulas, comparisons, and professor explanations.
+- Use **Bold** for keywords, *Italics* for definitions, and blockquotes for takeaways.
+- Use #, ##, and ### headings to make the notes easy to revise.
+- Use LaTeX for math. Inline: `$E = mc^2$`. Block: `$$...$$`.
+- Add timestamp tags `[MM:SS]` when a new concept begins if timing can be inferred.
+- The VERY LAST thing in the markdown string MUST be a Mermaid.js diagram wrapped in ```mermaid blocks.
+- For Mermaid, use `graph TD` and keep visible node text simple and alphanumeric.
+
+LANGUAGE:
+Translate and write the markdown notes entirely in the requested language: {language}.
+Ensure the notes read like a premium study guide!
+"""
+
 import imageio_ffmpeg
+
+class TokenLimitExceeded(Exception):
+    pass
+
+def is_token_limit_error(error: Exception) -> bool:
+    err_str = str(error).lower()
+    return (
+        "input token count exceeds" in err_str
+        or "maximum number of tokens allowed" in err_str
+        or ("invalid_argument" in err_str and "token" in err_str)
+    )
 
 def extract_frame(video_path: str, timestamp_str: str, output_filename: str):
     output_path = os.path.join("static", output_filename)
@@ -133,42 +160,39 @@ def robust_gemini_call(contents, model='gemini-2.5-flash', is_json=False):
             return response.text
         except Exception as e:
             err_str = str(e).lower()
+            if is_token_limit_error(e):
+                raise TokenLimitExceeded(
+                    "This lecture is too long for visual processing. Retrying with an audio-only study-notes mode."
+                ) from e
             if "429" in err_str or "503" in err_str or "quota" in err_str:
                 if attempt < max_retries - 1:
                     print(f"API Rate limit/Overload hit. Retrying in 65 seconds... (Attempt {attempt+1}/{max_retries})")
                     time.sleep(65)
                 else:
                     raise Exception("You have hit the Google Gemini API rate limit or quota limit. Please wait a few minutes and try again.")
-            elif "10054" in err_str or "connection" in err_str or "timeout" in err_str or "forcibly closed" in err_str:
-                if attempt < max_retries - 1:
-                    print(f"Network connection error ({err_str}). Retrying in 5 seconds... (Attempt {attempt+1}/{max_retries})")
-                    time.sleep(5)
-                else:
-                    raise Exception("Network connection to Gemini API failed repeatedly. Please check your internet connection and try again.")
             else:
-                if attempt < max_retries - 1:
-                    print(f"Unexpected error ({err_str}). Retrying in 3 seconds... (Attempt {attempt+1}/{max_retries})")
-                    time.sleep(3)
-                else:
-                    raise e
+                raise e
     raise Exception("Failed to generate content after retries.")
 
-def robust_file_upload(video_path: str):
-    max_retries = 3
-    for attempt in range(max_retries):
-        try:
-            print(f"Uploading video to Gemini (Attempt {attempt+1}/{max_retries})...")
-            return client.files.upload(file=video_path)
-        except Exception as e:
-            err_str = str(e).lower()
-            if attempt < max_retries - 1:
-                print(f"Upload failed ({err_str}). Retrying in 5 seconds...")
-                time.sleep(5)
-            else:
-                raise Exception("Failed to upload video to Gemini API after multiple attempts. The connection was forcibly closed.")
+def extract_audio_track(video_path: str) -> str:
+    audio_path = os.path.join("temp", f"audio_{uuid.uuid4().hex[:8]}.mp3")
+    ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+    command = [
+        ffmpeg_exe,
+        "-i", video_path,
+        "-vn",
+        "-ac", "1",
+        "-ar", "16000",
+        "-b:a", "48k",
+        audio_path,
+        "-y"
+    ]
+    subprocess.run(command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    return audio_path
 
-def process_video_and_generate_notes(video_path: str, language: str = "English") -> dict:
-    uploaded_file = robust_file_upload(video_path)
+def process_media_and_generate_notes(media_path: str, language: str = "English", visual_mode: bool = True) -> dict:
+    print("Uploading media to Gemini...")
+    uploaded_file = client.files.upload(file=media_path)
     assert uploaded_file is not None
     assert uploaded_file.name is not None
     assert uploaded_file.state is not None
@@ -183,27 +207,29 @@ def process_video_and_generate_notes(video_path: str, language: str = "English")
         raise ValueError("File processing in Gemini failed.")
         
     print("Generating notes...")
+    prompt = SYSTEM_PROMPT if visual_mode else AUDIO_SYSTEM_PROMPT
     markdown_output = robust_gemini_call(
-        contents=[uploaded_file, SYSTEM_PROMPT.format(language=language)],
+        contents=[uploaded_file, prompt.format(language=language)],
         is_json=False
     )
     
-    # Parse for [EXTRACT_FRAME_AT_MM:SS]
-    pattern = r'\[EXTRACT_FRAME_AT_(\d{1,2}:\d{2}(?::\d{2})?)\]'
-    matches = re.finditer(pattern, markdown_output)
-    
     final_markdown = markdown_output
-    
-    for match in matches:
-        timestamp = match.group(1)
-        full_tag = match.group(0)
-        
-        frame_filename = f"frame_{uuid.uuid4().hex[:8]}.jpg"
-        image_url = extract_frame(video_path, timestamp, frame_filename)
-        
-        if image_url:
-            image_markdown = f"![Diagram at {timestamp}]({image_url})"
-            final_markdown = final_markdown.replace(full_tag, image_markdown)
+
+    if visual_mode:
+        # Parse for [EXTRACT_FRAME_AT_MM:SS]
+        pattern = r'\[EXTRACT_FRAME_AT_(\d{1,2}:\d{2}(?::\d{2})?)\]'
+        matches = re.finditer(pattern, markdown_output)
+
+        for match in matches:
+            timestamp = match.group(1)
+            full_tag = match.group(0)
+
+            frame_filename = f"frame_{uuid.uuid4().hex[:8]}.jpg"
+            image_url = extract_frame(media_path, timestamp, frame_filename)
+
+            if image_url:
+                image_markdown = f"![Diagram at {timestamp}]({image_url})"
+                final_markdown = final_markdown.replace(full_tag, image_markdown)
     
     try:
         client.files.delete(name=uploaded_file.name)
@@ -211,6 +237,30 @@ def process_video_and_generate_notes(video_path: str, language: str = "English")
         print(f"Failed to delete file from Gemini: {e}")
         
     return {"markdown": final_markdown}
+
+def process_video_and_generate_notes(video_path: str, language: str = "English") -> dict:
+    try:
+        return process_media_and_generate_notes(video_path, language, visual_mode=True)
+    except TokenLimitExceeded:
+        print("Video exceeded Gemini token limit. Falling back to compressed audio-only processing.")
+        audio_path = ""
+        try:
+            audio_path = extract_audio_track(video_path)
+            result = process_media_and_generate_notes(audio_path, language, visual_mode=False)
+            result["markdown"] = (
+                "> NoteJam processed this long lecture in audio-only mode because the full video exceeded the AI visual context limit. "
+                "The notes are grounded in the professor's spoken explanation.\n\n"
+                + result["markdown"]
+            )
+            return result
+        except TokenLimitExceeded as e:
+            raise HTTPException(
+                status_code=413,
+                detail="This lecture is too long to process in one pass. Please try a shorter lecture segment or upload a trimmed part of the video."
+            ) from e
+        finally:
+            if audio_path and os.path.exists(audio_path):
+                os.remove(audio_path)
 
 @app.post("/process")
 async def process_lecture(
@@ -224,8 +274,7 @@ async def process_lecture(
     video_path = ""
     
     if file:
-        safe_filename = os.path.basename(file.filename) if file.filename else "upload.mp4"
-        video_path = os.path.join("temp", f"{uuid.uuid4()}_{safe_filename}")
+        video_path = os.path.join("temp", f"{uuid.uuid4()}_{file.filename}")
         with open(video_path, "wb") as buffer:
             buffer.write(await file.read())
     elif url:
@@ -238,28 +287,16 @@ async def process_lecture(
             'nocheckcertificate': True,
             'retries': 10,
             'fragment_retries': 10,
-            'socket_timeout': 30,
-            # Pass cookies to bypass YouTube bot detection
-            'cookiesfrombrowser': ('chrome',), 
+            'socket_timeout': 30
         }
+        print(f"Downloading from URL: {url}")
         try:
-            print(f"Downloading from URL (with Chrome cookies): {url}")
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([url])
         except Exception as e:
-            print(f"Failed with cookies, trying without... {e}")
-            ydl_opts_fallback = ydl_opts.copy()
-            ydl_opts_fallback.pop('cookiesfrombrowser', None)
-            try:
-                print(f"Downloading from URL (without cookies): {url}")
-                with yt_dlp.YoutubeDL(ydl_opts_fallback) as ydl:
-                    ydl.download([url])
-            except Exception as fallback_e:
-                if os.path.exists(video_path):
-                    os.remove(video_path)
-                if "Label" in str(fallback_e) or "Label" in repr(fallback_e):
-                    raise HTTPException(status_code=500, detail="Please RESTART your Python backend server terminal! It is still using the old code in its memory.")
-                raise HTTPException(status_code=400, detail=f"Failed to download video: {str(fallback_e)}")
+            if os.path.exists(video_path):
+                os.remove(video_path)
+            raise HTTPException(status_code=400, detail=f"Failed to download video: {str(e)}")
             
     if not os.path.exists(video_path):
         raise HTTPException(status_code=500, detail="Failed to acquire video.")
@@ -267,13 +304,16 @@ async def process_lecture(
     try:
         result = process_video_and_generate_notes(video_path, language)
         return result
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"Error processing video: {e}")
-        import traceback
-        traceback.print_exc()
-        if "Label" in str(e) or "Label" in repr(e):
-            raise HTTPException(status_code=500, detail="Please RESTART your Python backend server terminal! It is still using the old code in its memory.")
-        raise HTTPException(status_code=500, detail=f"Failed to generate notes: {str(e)}")
+        if is_token_limit_error(e):
+            raise HTTPException(
+                status_code=413,
+                detail="This lecture is too long to process in one pass. Please try a shorter lecture segment or upload a trimmed part of the video."
+            )
+        raise HTTPException(status_code=500, detail="NoteJam could not process this lecture. Please try another link or upload the video file directly.")
     finally:
         if os.path.exists(video_path):
             os.remove(video_path)
