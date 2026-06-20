@@ -251,6 +251,7 @@ const NoteApp = () => {
   const [isGeneratingCheatsheet, setIsGeneratingCheatsheet] = useState(false);
   const [language, setLanguage] = useState("English");
   const [error, setError] = useState<string | null>(null);
+  const [processingMessage, setProcessingMessage] = useState<string | null>(null);
   const [videoSrc, setVideoSrc] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isGeneratingFlashcards, setIsGeneratingFlashcards] = useState(false);
@@ -502,6 +503,7 @@ const NoteApp = () => {
     
     setIsLoading(true);
     setError(null);
+    setProcessingMessage("Preparing your lecture...");
     
     try {
       const formData = new FormData();
@@ -524,7 +526,10 @@ const NoteApp = () => {
         throw new Error(errData.detail || "Failed to process video");
       }
 
-      const data = await response.json();
+      let data = await response.json();
+      if (data.job_id) {
+        data = await pollProcessJob(data.job_id, data.message);
+      }
       const parsedMarkdown = data.markdown.replace(/(?<!\]\()\[(\d{1,2}:\d{2}(?::\d{2})?)\](?!\()/g, '[$1](#$1)');
       setMarkdown(parsedMarkdown);
       setCheatsheet([]);
@@ -537,10 +542,38 @@ const NoteApp = () => {
       setIsArtifactConsoleOpen(true);
       setCurrentView("home");
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "An unexpected error occurred");
+      const message = err instanceof Error ? err.message : "An unexpected error occurred";
+      setError(message === "Failed to fetch" ? "Could not reach the notes engine. Please restart the backend and try again." : message);
     } finally {
       setIsLoading(false);
+      setProcessingMessage(null);
     }
+  };
+
+  const pollProcessJob = async (jobId: string, firstMessage?: string) => {
+    setProcessingMessage(firstMessage || "Preparing your lecture...");
+
+    for (let attempt = 0; attempt < 720; attempt += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 5000));
+      const response = await fetch(`${API_BASE}/process/${jobId}`);
+      if (!response.ok) {
+        const errData = await response.json();
+        throw new Error(errData.detail || "Could not check note generation progress.");
+      }
+
+      const data = await response.json();
+      setProcessingMessage(data.message || "Generating your notes...");
+
+      if (data.status === "complete") {
+        return data.result;
+      }
+
+      if (data.status === "failed") {
+        throw new Error(data.message || "Note generation failed.");
+      }
+    }
+
+    throw new Error("Note generation is taking too long. Please try again with a shorter lecture.");
   };
 
   const confirmExport = () => {
@@ -1676,6 +1709,11 @@ const NoteApp = () => {
                           </div>
                         </div>
 
+                        {processingMessage && !error && (
+                          <p style={{ color: '#dffcf7', fontSize: '0.85rem', marginTop: '1.5rem', fontWeight: 700, textAlign: 'center' }}>
+                            {processingMessage}
+                          </p>
+                        )}
                         {error && <p style={{ color: '#ffffff', fontSize: '0.85rem', marginTop: '1.5rem', fontWeight: 500, textAlign: 'center' }}>{error}</p>}
 
                         <button 

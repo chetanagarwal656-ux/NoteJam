@@ -11,6 +11,7 @@ from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 import csv
 import io
+import threading
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from google import genai
@@ -144,6 +145,12 @@ Chunk notes:
 import imageio_ffmpeg
 
 CHUNK_SECONDS = 25 * 60
+PROCESS_JOBS: dict[str, dict] = {}
+PROCESS_JOBS_LOCK = threading.Lock()
+
+def update_process_job(job_id: str, **updates):
+    with PROCESS_JOBS_LOCK:
+        PROCESS_JOBS[job_id] = {**PROCESS_JOBS.get(job_id, {}), **updates}
 
 class TokenLimitExceeded(Exception):
     pass
@@ -372,6 +379,53 @@ def process_video_and_generate_notes(video_path: str, language: str = "English")
                 detail="This lecture is too dense to process even in 25-minute chunks. Please try a shorter lecture segment or upload a trimmed part of the video."
             ) from e
 
+def download_video_from_url(url: str) -> str:
+    from typing import Any
+    video_path = os.path.join("temp", f"{uuid.uuid4()}.mp4")
+    ydl_opts: dict[str, Any] = {
+        'format': 'worst[ext=mp4]',
+        'outtmpl': video_path,
+        'quiet': True,
+        'nocheckcertificate': True,
+        'retries': 10,
+        'fragment_retries': 10,
+        'socket_timeout': 30
+    }
+    print(f"Downloading from URL: {url}")
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
+    except Exception:
+        if os.path.exists(video_path):
+            os.remove(video_path)
+        raise
+    return video_path
+
+def run_process_job(job_id: str, language: str, url: Optional[str] = None, video_path: str = ""):
+    try:
+        update_process_job(job_id, status="working", message="Downloading and preparing your lecture...")
+        if url:
+            video_path = download_video_from_url(url)
+
+        if not video_path or not os.path.exists(video_path):
+            raise ValueError("Failed to acquire video.")
+
+        update_process_job(job_id, status="working", message="Analyzing lecture audio, visuals, timestamps, and board content...")
+        result = process_video_and_generate_notes(video_path, language)
+        update_process_job(job_id, status="complete", message="Notes ready", result=result)
+    except HTTPException as e:
+        update_process_job(job_id, status="failed", message=e.detail)
+    except Exception as e:
+        print(f"Error processing video job {job_id}: {e}")
+        if is_token_limit_error(e):
+            message = "This lecture is too dense to process even in 25-minute chunks. Please try a shorter lecture segment."
+        else:
+            message = "NoteJam could not process this lecture. Please try another link or upload the video file directly."
+        update_process_job(job_id, status="failed", message=message)
+    finally:
+        if video_path and os.path.exists(video_path):
+            os.remove(video_path)
+
 @app.post("/process")
 async def process_lecture(
     url: Optional[str] = Form(None),
@@ -380,53 +434,31 @@ async def process_lecture(
 ):
     if not url and not file:
         raise HTTPException(status_code=400, detail="Must provide either a url or a file.")
-        
+
+    job_id = uuid.uuid4().hex
     video_path = ""
-    
+    update_process_job(job_id, status="queued", message="Preparing your lecture...")
+
     if file:
         video_path = os.path.join("temp", f"{uuid.uuid4()}_{file.filename}")
         with open(video_path, "wb") as buffer:
             buffer.write(await file.read())
-    elif url:
-        from typing import Any
-        video_path = os.path.join("temp", f"{uuid.uuid4()}.mp4")
-        ydl_opts: dict[str, Any] = {
-            'format': 'worst[ext=mp4]', # Download lowest quality to avoid large files and dropped connections
-            'outtmpl': video_path,
-            'quiet': True,
-            'nocheckcertificate': True,
-            'retries': 10,
-            'fragment_retries': 10,
-            'socket_timeout': 30
-        }
-        print(f"Downloading from URL: {url}")
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([url])
-        except Exception as e:
-            if os.path.exists(video_path):
-                os.remove(video_path)
-            raise HTTPException(status_code=400, detail=f"Failed to download video: {str(e)}")
-            
-    if not os.path.exists(video_path):
-        raise HTTPException(status_code=500, detail="Failed to acquire video.")
-        
-    try:
-        result = process_video_and_generate_notes(video_path, language)
-        return result
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"Error processing video: {e}")
-        if is_token_limit_error(e):
-            raise HTTPException(
-                status_code=413,
-                detail="This lecture is too long to process in one pass. Please try a shorter lecture segment or upload a trimmed part of the video."
-            )
-        raise HTTPException(status_code=500, detail="NoteJam could not process this lecture. Please try another link or upload the video file directly.")
-    finally:
-        if os.path.exists(video_path):
-            os.remove(video_path)
+
+    worker = threading.Thread(
+        target=run_process_job,
+        kwargs={"job_id": job_id, "language": language, "url": url, "video_path": video_path},
+        daemon=True
+    )
+    worker.start()
+    return {"job_id": job_id, "status": "queued", "message": "Preparing your lecture..."}
+
+@app.get("/process/{job_id}")
+def get_process_job(job_id: str):
+    with PROCESS_JOBS_LOCK:
+        job = PROCESS_JOBS.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Processing job not found.")
+    return job
 
 class FlashcardRequest(BaseModel):
     markdown: str
