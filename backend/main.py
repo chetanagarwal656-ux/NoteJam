@@ -3,14 +3,10 @@ import re
 import uuid
 import subprocess
 import time
+import json
 from typing import Optional
-from fastapi import FastAPI, UploadFile, Form, HTTPException, WebSocket, WebSocketDisconnect
-import asyncio
-from google.genai import types
-from fastapi.responses import PlainTextResponse
+from fastapi import FastAPI, UploadFile, Form, HTTPException
 from pydantic import BaseModel
-import csv
-import io
 import threading
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -22,9 +18,24 @@ from datetime import datetime
 
 load_dotenv()
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+configured_db_path = os.getenv("NOTEJAM_DB_PATH")
+DB_PATH = (
+    configured_db_path
+    if configured_db_path and os.path.isabs(configured_db_path)
+    else os.path.join(BASE_DIR, configured_db_path or "notejam.db")
+)
+STATIC_DIR = os.path.join(BASE_DIR, "static")
+TEMP_DIR = os.path.join(BASE_DIR, "temp")
+
+def get_allowed_origins() -> list[str]:
+    raw_origins = os.getenv("ALLOWED_ORIGINS", "*")
+    origins = [origin.strip() for origin in raw_origins.split(",") if origin.strip()]
+    return origins or ["*"]
+
 # Initialize Database
 def init_db():
-    conn = sqlite3.connect("notejam.db")
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS notes (
@@ -53,25 +64,45 @@ init_db()
 
 app = FastAPI(title="AI Lecture Notes Generator API")
 
+allowed_origins = get_allowed_origins()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=allowed_origins,
+    allow_credentials="*" not in allowed_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-os.makedirs("static", exist_ok=True)
-os.makedirs("temp", exist_ok=True)
+os.makedirs(STATIC_DIR, exist_ok=True)
+os.makedirs(TEMP_DIR, exist_ok=True)
 
-app.mount("/static", StaticFiles(directory="static"), name="static")
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 client = genai.Client(http_options={'timeout': 3600000}) 
 
-import json
-
 def get_public_base_url() -> str:
     return os.getenv("PUBLIC_BASE_URL", "http://localhost:8000").rstrip("/")
+
+def parse_json_response(raw_text: str):
+    cleaned = raw_text.strip()
+    if cleaned.startswith("```json"):
+        cleaned = re.sub(r"^```json\s*", "", cleaned)
+        cleaned = re.sub(r"\s*```$", "", cleaned)
+    elif cleaned.startswith("```"):
+        cleaned = re.sub(r"^```\s*", "", cleaned)
+        cleaned = re.sub(r"\s*```$", "", cleaned)
+
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        start_candidates = [idx for idx in (cleaned.find("{"), cleaned.find("[")) if idx != -1]
+        if not start_candidates:
+            raise
+        start = min(start_candidates)
+        end = max(cleaned.rfind("}"), cleaned.rfind("]"))
+        if end <= start:
+            raise
+        return json.loads(cleaned[start:end + 1])
 
 SYSTEM_PROMPT = """
 You are Note Jam, an elite AI teaching assistant.
@@ -145,12 +176,27 @@ Chunk notes:
 import imageio_ffmpeg
 
 CHUNK_SECONDS = 25 * 60
+MAX_PROCESS_JOBS = 200
 PROCESS_JOBS: dict[str, dict] = {}
 PROCESS_JOBS_LOCK = threading.Lock()
 
 def update_process_job(job_id: str, **updates):
     with PROCESS_JOBS_LOCK:
-        PROCESS_JOBS[job_id] = {**PROCESS_JOBS.get(job_id, {}), **updates}
+        PROCESS_JOBS[job_id] = {
+            **PROCESS_JOBS.get(job_id, {}),
+            **updates,
+            "updated_at": time.time()
+        }
+        if len(PROCESS_JOBS) > MAX_PROCESS_JOBS:
+            removable_jobs = sorted(
+                (
+                    (job.get("updated_at", 0), old_job_id)
+                    for old_job_id, job in PROCESS_JOBS.items()
+                    if old_job_id != job_id and job.get("status") in {"complete", "failed"}
+                )
+            )
+            for _, old_job_id in removable_jobs[:len(PROCESS_JOBS) - MAX_PROCESS_JOBS]:
+                PROCESS_JOBS.pop(old_job_id, None)
 
 class TokenLimitExceeded(Exception):
     pass
@@ -164,7 +210,7 @@ def is_token_limit_error(error: Exception) -> bool:
     )
 
 def extract_frame(video_path: str, timestamp_str: str, output_filename: str):
-    output_path = os.path.join("static", output_filename)
+    output_path = os.path.join(STATIC_DIR, output_filename)
     ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
     command = [
         ffmpeg_exe,
@@ -209,7 +255,7 @@ def robust_gemini_call(contents, model='gemini-2.5-flash', is_json=False):
     raise Exception("Failed to generate content after retries.")
 
 def extract_audio_track(video_path: str) -> str:
-    audio_path = os.path.join("temp", f"audio_{uuid.uuid4().hex[:8]}.mp3")
+    audio_path = os.path.join(TEMP_DIR, f"audio_{uuid.uuid4().hex[:8]}.mp3")
     ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
     command = [
         ffmpeg_exe,
@@ -243,7 +289,7 @@ def split_video_into_chunks(video_path: str, chunk_seconds: int = CHUNK_SECONDS)
 
     for index in range(total_chunks):
         start = index * chunk_seconds
-        chunk_path = os.path.join("temp", f"chunk_{uuid.uuid4().hex[:8]}_{index + 1}.mp4")
+        chunk_path = os.path.join(TEMP_DIR, f"chunk_{uuid.uuid4().hex[:8]}_{index + 1}.mp4")
         command = [
             ffmpeg_exe,
             "-ss", str(start),
@@ -320,51 +366,54 @@ def process_chunked_video_and_generate_notes(video_path: str, language: str = "E
 
 def process_media_and_generate_notes(media_path: str, language: str = "English", visual_mode: bool = True) -> dict:
     print("Uploading media to Gemini...")
-    uploaded_file = client.files.upload(file=media_path)
-    assert uploaded_file is not None
-    assert uploaded_file.name is not None
-    assert uploaded_file.state is not None
-    
-    # Wait for the file to be processed
-    while uploaded_file.state.name == "PROCESSING":
-        print('Processing file in Gemini...', flush=True)
-        time.sleep(10)
-        uploaded_file = client.files.get(name=uploaded_file.name)
-        
-    if uploaded_file.state.name == "FAILED":
-        raise ValueError("File processing in Gemini failed.")
-        
-    print("Generating notes...")
-    prompt = SYSTEM_PROMPT if visual_mode else AUDIO_SYSTEM_PROMPT
-    markdown_output = robust_gemini_call(
-        contents=[uploaded_file, prompt.format(language=language)],
-        is_json=False
-    )
-    
-    final_markdown = markdown_output
-
-    if visual_mode:
-        # Parse for [EXTRACT_FRAME_AT_MM:SS]
-        pattern = r'\[EXTRACT_FRAME_AT_(\d{1,2}:\d{2}(?::\d{2})?)\]'
-        matches = re.finditer(pattern, markdown_output)
-
-        for match in matches:
-            timestamp = match.group(1)
-            full_tag = match.group(0)
-
-            frame_filename = f"frame_{uuid.uuid4().hex[:8]}.jpg"
-            image_url = extract_frame(media_path, timestamp, frame_filename)
-
-            if image_url:
-                image_markdown = f"![Diagram at {timestamp}]({image_url})"
-                final_markdown = final_markdown.replace(full_tag, image_markdown)
-    
+    uploaded_file = None
     try:
-        client.files.delete(name=uploaded_file.name)
-    except Exception as e:
-        print(f"Failed to delete file from Gemini: {e}")
+        uploaded_file = client.files.upload(file=media_path)
+        assert uploaded_file is not None
+        assert uploaded_file.name is not None
+        assert uploaded_file.state is not None
+
+        # Wait for the file to be processed
+        while uploaded_file.state.name == "PROCESSING":
+            print('Processing file in Gemini...', flush=True)
+            time.sleep(10)
+            uploaded_file = client.files.get(name=uploaded_file.name)
+
+        if uploaded_file.state.name == "FAILED":
+            raise ValueError("File processing in Gemini failed.")
+
+        print("Generating notes...")
+        prompt = SYSTEM_PROMPT if visual_mode else AUDIO_SYSTEM_PROMPT
+        markdown_output = robust_gemini_call(
+            contents=[uploaded_file, prompt.format(language=language)],
+            is_json=False
+        )
+
+        final_markdown = markdown_output
+
+        if visual_mode:
+            # Parse for [EXTRACT_FRAME_AT_MM:SS]
+            pattern = r'\[EXTRACT_FRAME_AT_(\d{1,2}:\d{2}(?::\d{2})?)\]'
+            matches = re.finditer(pattern, markdown_output)
+
+            for match in matches:
+                timestamp = match.group(1)
+                full_tag = match.group(0)
+
+                frame_filename = f"frame_{uuid.uuid4().hex[:8]}.jpg"
+                image_url = extract_frame(media_path, timestamp, frame_filename)
+
+                if image_url:
+                    image_markdown = f"![Diagram at {timestamp}]({image_url})"
+                    final_markdown = final_markdown.replace(full_tag, image_markdown)
         
-    return {"markdown": final_markdown}
+        return {"markdown": final_markdown}
+    finally:
+        if uploaded_file and uploaded_file.name:
+            try:
+                client.files.delete(name=uploaded_file.name)
+            except Exception as e:
+                print(f"Failed to delete file from Gemini: {e}")
 
 def process_video_and_generate_notes(video_path: str, language: str = "English") -> dict:
     try:
@@ -381,7 +430,7 @@ def process_video_and_generate_notes(video_path: str, language: str = "English")
 
 def download_video_from_url(url: str) -> str:
     from typing import Any
-    video_path = os.path.join("temp", f"{uuid.uuid4()}.mp4")
+    video_path = os.path.join(TEMP_DIR, f"{uuid.uuid4()}.mp4")
     ydl_opts: dict[str, Any] = {
         'format': 'worst[ext=mp4]',
         'outtmpl': video_path,
@@ -440,7 +489,8 @@ async def process_lecture(
     update_process_job(job_id, status="queued", message="Preparing your lecture...")
 
     if file:
-        video_path = os.path.join("temp", f"{uuid.uuid4()}_{file.filename}")
+        safe_filename = os.path.basename(file.filename or "upload.mp4")
+        video_path = os.path.join(TEMP_DIR, f"{uuid.uuid4()}_{safe_filename}")
         with open(video_path, "wb") as buffer:
             buffer.write(await file.read())
 
@@ -476,19 +526,7 @@ def create_flashcards(req: FlashcardRequest):
     """
     try:
         raw_text = robust_gemini_call(contents=[prompt], is_json=True)
-        raw_text = raw_text.strip()
-        if raw_text.startswith("```json"):
-            import re
-            raw_text = re.sub(r"^```json\s*", "", raw_text)
-            raw_text = re.sub(r"\s*```$", "", raw_text)
-        elif raw_text.startswith("```"):
-            import re
-            raw_text = re.sub(r"^```\s*", "", raw_text)
-            raw_text = re.sub(r"\s*```$", "", raw_text)
-            
-        import json
-        flashcards = json.loads(raw_text)
-        
+        flashcards = parse_json_response(raw_text)
         return {"flashcards": flashcards}
     except Exception as e:
         print(f"Error generating flashcards: {e}")
@@ -509,17 +547,7 @@ def create_cheatsheet(req: DocumentRequest):
     """
     try:
         raw_text = robust_gemini_call(contents=[prompt], is_json=True)
-        import json
-        raw_text = raw_text.strip()
-        if raw_text.startswith("```json"):
-            import re
-            raw_text = re.sub(r"^```json\s*", "", raw_text)
-            raw_text = re.sub(r"\s*```$", "", raw_text)
-        elif raw_text.startswith("```"):
-            import re
-            raw_text = re.sub(r"^```\s*", "", raw_text)
-            raw_text = re.sub(r"\s*```$", "", raw_text)
-        return {"cheatsheet": json.loads(raw_text)}
+        return {"cheatsheet": parse_json_response(raw_text)}
     except Exception as e:
         print(f"Error generating cheatsheet: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -527,8 +555,8 @@ def create_cheatsheet(req: DocumentRequest):
 @app.post("/mindmap")
 def create_mindmap(req: DocumentRequest):
     prompt = f"""
-    Based on the following lecture notes, generate a 3D interactive mind map structure.
-    Identify the core central concept, main branches, and sub-topics.
+    Based on the following lecture notes, generate a clear study mind map structure for a polished one-page revision infographic.
+    Identify one central concept, 5-7 main branches, and the most useful sub-topics under each branch.
     Return ONLY a strictly valid JSON object with the following structure:
     {{
         "nodes": [
@@ -540,6 +568,7 @@ def create_mindmap(req: DocumentRequest):
         ]
     }}
     Ensure all sources and targets in links exactly match the id of a node.
+    Keep node labels concise, readable, and student-friendly.
     Do not include any text or markdown outside the JSON object.
     
     Notes:
@@ -547,17 +576,7 @@ def create_mindmap(req: DocumentRequest):
     """
     try:
         raw_text = robust_gemini_call(contents=[prompt], is_json=True)
-        import json
-        raw_text = raw_text.strip()
-        if raw_text.startswith("```json"):
-            import re
-            raw_text = re.sub(r"^```json\s*", "", raw_text)
-            raw_text = re.sub(r"\s*```$", "", raw_text)
-        elif raw_text.startswith("```"):
-            import re
-            raw_text = re.sub(r"^```\s*", "", raw_text)
-            raw_text = re.sub(r"\s*```$", "", raw_text)
-        return {"mindmap": json.loads(raw_text)}
+        return {"mindmap": parse_json_response(raw_text)}
     except Exception as e:
         print(f"Error generating mindmap: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -682,18 +701,7 @@ Lecture Notes:
         if not raw_text:
             raise ValueError("Model failed to generate a response.")
             
-        raw_text = raw_text.strip()
-        if raw_text.startswith("```json"):
-            import re
-            raw_text = re.sub(r"^```json\s*", "", raw_text)
-            raw_text = re.sub(r"\s*```$", "", raw_text)
-        elif raw_text.startswith("```"):
-            import re
-            raw_text = re.sub(r"^```\s*", "", raw_text)
-            raw_text = re.sub(r"\s*```$", "", raw_text)
-            
-        script = json.loads(raw_text)
-        
+        script = parse_json_response(raw_text)
         import edge_tts
         final_audio = b""
         
@@ -724,7 +732,7 @@ Lecture Notes:
                         raise tts_err
             
         filename = f"podcast_{uuid.uuid4().hex[:8]}.mp3"
-        filepath = os.path.join("static", filename)
+        filepath = os.path.join(STATIC_DIR, filename)
         with open(filepath, "wb") as f:
             f.write(final_audio)
             
@@ -738,7 +746,8 @@ from fastapi.responses import FileResponse
 
 @app.get("/api/audio/{filename}")
 def get_audio(filename: str):
-    filepath = os.path.join("static", filename)
+    safe_filename = os.path.basename(filename)
+    filepath = os.path.join(STATIC_DIR, safe_filename)
     if not os.path.exists(filepath):
         raise HTTPException(status_code=404, detail="Audio not found")
     media_type = "audio/mpeg"
@@ -762,7 +771,7 @@ def save_note(note: NoteData):
     note_id = uuid.uuid4().hex
     created_at = datetime.now().isoformat()
     
-    conn = sqlite3.connect("notejam.db")
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("""
         INSERT INTO notes (id, title, video_url, markdown, cheatsheet, mindmap, flashcards, created_at, ai_podcast_url, ai_debate_url)
@@ -786,7 +795,7 @@ def save_note(note: NoteData):
 
 @app.get("/notes")
 def get_notes():
-    conn = sqlite3.connect("notejam.db")
+    conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute("SELECT id, title, created_at, video_url FROM notes ORDER BY created_at DESC")
@@ -796,7 +805,7 @@ def get_notes():
 
 @app.get("/notes/{note_id}")
 def get_note(note_id: str):
-    conn = sqlite3.connect("notejam.db")
+    conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM notes WHERE id = ?", (note_id,))
@@ -815,7 +824,7 @@ def get_note(note_id: str):
 
 @app.put("/notes/{note_id}")
 def update_note(note_id: str, note: NoteData):
-    conn = sqlite3.connect("notejam.db")
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("""
         UPDATE notes 
@@ -838,7 +847,7 @@ def update_note(note_id: str, note: NoteData):
 
 @app.delete("/notes/{note_id}")
 def delete_note(note_id: str):
-    conn = sqlite3.connect("notejam.db")
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("DELETE FROM notes WHERE id = ?", (note_id,))
     conn.commit()

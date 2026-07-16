@@ -43,4 +43,12 @@ Start command:
 uvicorn main:app --host 0.0.0.0 --port $PORT
 ```
 
+Backend environment variables:
+
+```bash
+GEMINI_API_KEY=your_gemini_api_key
+PUBLIC_BASE_URL=https://your-render-backend.onrender.com
+ALLOWED_ORIGINS=https://your-vercel-frontend.vercel.app,http://localhost:3000
+```
+
 Deploy the frontend on Vercel from the `frontend/` directory and set `NEXT_PUBLIC_API_URL` to the deployed backend URL.

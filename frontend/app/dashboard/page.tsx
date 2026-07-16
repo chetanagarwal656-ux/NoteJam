@@ -163,14 +163,12 @@ const LiveBackground = () => {
   const [symbols, setSymbols] = useState<{ id: number; char: string; left: string; top: string; delay: string; duration: string; size: string }[]>([]);
 
   useEffect(() => {
-    // Dense, minute symbols encompassing all sciences
+    // Dense, minute symbols encompassing study, math, physics, and chemistry.
+    // Keep this ASCII-only so the ambient layer never renders broken glyph boxes.
     const chars = [
-      // Math & Operators
-      "∫", "∑", "∆", "π", "∞", "√", "∂", "∇", "∝", "∰", "+", "×", "÷", "=", "−", "±", "∓", "≈", "≠", "≡",
-      // Physics & Greek
-      "ℏ", "α", "β", "γ", "θ", "λ", "μ", "ξ", "ρ", "σ", "τ", "Φ", "Ψ", "Ω", "ω", "ε",
-      // Chemistry & Biology
-      "⌬", "⚗", "⚛", "🧬", "O₂", "H₂O", "CO₂", "CH₄", "NH₃"
+      "sum", "int", "sqrt", "dx", "dy", "lim", "log", "sin", "cos", "+", "-", "x", "=", "f(x)",
+      "pi", "theta", "lambda", "alpha", "beta", "gamma", "delta", "omega", "mu", "sigma",
+      "E=mc2", "F=ma", "v=u+at", "PV=nRT", "H2O", "CO2", "CH4", "NH3", "DNA", "ATP"
     ];
     const generatedSymbols = Array.from({ length: 150 }).map((_, i) => ({
       id: i,
@@ -1421,7 +1419,9 @@ const NoteApp = () => {
           playing={isPlaying}
           onPlay={() => setIsPlaying(true)}
           onPause={() => setIsPlaying(false)}
-          onError={(e) => console.log("Player Error (Ignored):", e)}
+          onError={() => {
+            // ReactPlayer can emit non-fatal provider errors for blocked embeds.
+          }}
         />
       </div>
     ) : (
