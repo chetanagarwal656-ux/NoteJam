@@ -2,7 +2,7 @@
 
 import { useCallback, useState, useEffect, useRef } from "react";
 import ReactPlayer from "react-player";
-import { Upload, Link as LinkIcon, Sparkles, Download, Loader2, Home, Clock, BookOpen, Layers, BrainCircuit, FileSignature, X, ChevronLeft, ChevronRight, RotateCcw, MessageCircle, Send, Save, Trash2, PenTool, ImageOff, Moon, Sun, Maximize2, Minimize2, Volume2, Play, Pause, FastForward, Rewind } from "lucide-react";
+import { Upload, Link as LinkIcon, Sparkles, Download, Loader2, Home, Clock, BookOpen, Layers, BrainCircuit, FileSignature, X, ChevronLeft, ChevronRight, RotateCcw, MessageCircle, Send, Save, Trash2, PenTool, ImageOff, Moon, Sun, Maximize2, Minimize2, Volume2, Play, Pause, FastForward, Rewind, PanelRightClose } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import mermaid from "mermaid";
 import remarkMath from "remark-math";
@@ -14,7 +14,36 @@ import { useAuth, useClerk, UserButton } from "@clerk/nextjs";
 type Flashcard = { question: string; answer: string; explanation?: string };
 type MindmapNode = { id: string; color?: string; group?: string | number };
 type MindmapLink = { source: string | MindmapNode; target: string | MindmapNode };
-type MindmapData = { nodes: MindmapNode[]; links: MindmapLink[] };
+type SketchMindmapBranch = { title: string; prompt?: string; bullets: string[]; icon?: string };
+type SketchMindmapItem = { label: string; detail?: string };
+type RevisionMindmapSection = {
+  title: string;
+  cue?: string;
+  kind?: string;
+  importance?: number;
+  icon?: string;
+  bullets?: string[];
+  formulas?: string[];
+  examples?: string[];
+};
+type RevisionMindmapFact = { label: string; detail?: string };
+type MindmapData = {
+  version?: string;
+  title?: string;
+  centralConcept?: string;
+  thesis?: string;
+  sections?: RevisionMindmapSection[];
+  formulas?: RevisionMindmapFact[];
+  takeaways?: string[];
+  centerSummary?: string[];
+  branches?: SketchMindmapBranch[];
+  examples?: SketchMindmapItem[];
+  results?: SketchMindmapItem[];
+  flow?: string[];
+  footer?: string;
+  nodes?: MindmapNode[];
+  links?: MindmapLink[];
+};
 type SavedNote = {
   id: string;
   title: string;
@@ -64,25 +93,6 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 const getMindmapNodeId = (node: string | MindmapNode) => (
   typeof node === "string" ? node : node.id
 );
-
-const wrapSvgText = (text: string, maxChars: number) => {
-  const words = text.replace(/\s+/g, " ").trim().split(" ");
-  const lines: string[] = [];
-  let current = "";
-
-  words.forEach((word) => {
-    const candidate = current ? `${current} ${word}` : word;
-    if (candidate.length > maxChars && current) {
-      lines.push(current);
-      current = word;
-    } else {
-      current = candidate;
-    }
-  });
-
-  if (current) lines.push(current);
-  return lines.length > 0 ? lines : [text];
-};
 
 // Mermaid Component
 const Mermaid = ({ chart, noteTheme, isHandwritten }: { chart: string; noteTheme: "dark" | "light"; isHandwritten: boolean }) => {
@@ -138,6 +148,18 @@ const Mermaid = ({ chart, noteTheme, isHandwritten }: { chart: string; noteTheme
     </div>
   );
 };
+
+const normalizeFlashcardMath = (text: string) => (
+  text.replace(/\\\\([A-Za-z])/g, "\\$1")
+);
+
+const FlashcardRichText = ({ text }: { text: string }) => (
+  <div className={styles.flashcardRichText}>
+    <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+      {normalizeFlashcardMath(text)}
+    </ReactMarkdown>
+  </div>
+);
 
 // Advanced Animated Title (Left-to-Right Diffusion)
 const AnimatedTitle = ({ text, isAppMode = false }: { text: string, isAppMode?: boolean }) => {
@@ -252,6 +274,8 @@ const NoteApp = () => {
   const [processingMessage, setProcessingMessage] = useState<string | null>(null);
   const [videoSrc, setVideoSrc] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isSourcePinned, setIsSourcePinned] = useState(false);
+  const [pendingSeekSeconds, setPendingSeekSeconds] = useState<number | null>(null);
   const [isGeneratingFlashcards, setIsGeneratingFlashcards] = useState(false);
   const [flashcards, setFlashcards] = useState<Flashcard[] | null>(null);
   const [flashcardIndex, setFlashcardIndex] = useState(0);
@@ -300,6 +324,19 @@ const NoteApp = () => {
   const didRestoreWorkspace = useRef(false);
 
   const playerRef = useRef<HTMLVideoElement | null>(null);
+
+  useEffect(() => {
+    if (pendingSeekSeconds === null) return;
+
+    const timer = window.setTimeout(() => {
+      if (playerRef.current) {
+        playerRef.current.currentTime = pendingSeekSeconds;
+        setPendingSeekSeconds(null);
+      }
+    }, 180);
+
+    return () => window.clearTimeout(timer);
+  }, [pendingSeekSeconds, isSourcePinned, activeArtifact]);
 
   const fetchNotes = useCallback(async () => {
     if (!isLoaded || !isSignedIn) return; // Do not fetch if auth is not ready or not signed in
@@ -585,6 +622,46 @@ const NoteApp = () => {
     }, 500);
   };
 
+  const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
+
+  const responseMessage = async (response: Response, fallback: string) => {
+    try {
+      const data = await response.json();
+      return data?.detail || data?.message || fallback;
+    } catch {
+      return fallback;
+    }
+  };
+
+  const postJsonWithRetry = async <T,>(endpoint: string, body: unknown, fallbackMessage: string): Promise<T> => {
+    let lastError = new Error(fallbackMessage);
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const response = await fetch(`${API_BASE}${endpoint}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+
+        if (response.ok) {
+          return await response.json() as T;
+        }
+
+        lastError = new Error(await responseMessage(response, fallbackMessage));
+        const retryable = response.status === 429 || response.status >= 500;
+        if (!retryable || attempt === 1) break;
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(fallbackMessage);
+        if (attempt === 1) break;
+      }
+
+      await wait(900);
+    }
+
+    throw lastError;
+  };
+
   const autosaveCurrentNote = async (patch: Partial<Pick<WorkspaceSnapshot, "cheatsheet" | "mindmap" | "flashcards" | "aiPodcastUrl" | "aiDebateUrl">>) => {
     if (!currentNoteId || !markdown) return;
 
@@ -617,20 +694,15 @@ const NoteApp = () => {
     if (!markdown) return;
     setIsGeneratingCheatsheet(true);
     try {
-      const response = await fetch(`${API_BASE}/cheatsheet`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ markdown }),
-      });
-      if (!response.ok) throw new Error("Failed to generate cheatsheet");
-      const data = await response.json();
+      const data = await postJsonWithRetry<{ cheatsheet: string[] }>("/cheatsheet", { markdown }, "Failed to generate cheatsheet");
       setCheatsheet(data.cheatsheet);
       setActiveArtifact("cheatsheet");
       setIsArtifactConsoleOpen(true);
       await autosaveCurrentNote({ cheatsheet: data.cheatsheet });
     } catch (err) {
-      console.error(err);
-      alert("Failed to generate cheatsheet.");
+      const message = err instanceof Error ? err.message : "Failed to generate cheatsheet.";
+      setSaveMessage(message);
+      setTimeout(() => setSaveMessage(""), 3500);
     } finally {
       setIsGeneratingCheatsheet(false);
     }
@@ -640,20 +712,15 @@ const NoteApp = () => {
     if (!markdown) return;
     setIsGeneratingMindmap(true);
     try {
-      const response = await fetch(`${API_BASE}/mindmap`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ markdown }),
-      });
-      if (!response.ok) throw new Error("Failed to generate mind map");
-      const data = await response.json();
+      const data = await postJsonWithRetry<{ mindmap: MindmapData }>("/mindmap", { markdown }, "Failed to generate mind map");
       setMindmap(data.mindmap);
       setActiveArtifact("mindmap");
       setIsArtifactConsoleOpen(true);
       await autosaveCurrentNote({ mindmap: data.mindmap });
     } catch (err) {
-      console.error(err);
-      alert("Failed to generate mind map.");
+      const message = err instanceof Error ? err.message : "Failed to generate mind map.";
+      setSaveMessage(message);
+      setTimeout(() => setSaveMessage(""), 3500);
     } finally {
       setIsGeneratingMindmap(false);
     }
@@ -672,13 +739,7 @@ const NoteApp = () => {
     
     setIsGeneratingFlashcards(true);
     try {
-      const response = await fetch(`${API_BASE}/flashcards`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ markdown }),
-      });
-      if (!response.ok) throw new Error("Failed to generate flashcards");
-      const data = await response.json();
+      const data = await postJsonWithRetry<{ flashcards: Flashcard[] }>("/flashcards", { markdown }, "Failed to generate flashcards");
       setFlashcards(data.flashcards);
       setFlashcardIndex(0);
       setIsFlipped(false);
@@ -687,8 +748,9 @@ const NoteApp = () => {
       setIsArtifactConsoleOpen(true);
       await autosaveCurrentNote({ flashcards: data.flashcards });
     } catch (err) {
-      console.error(err);
-      alert("Failed to generate flashcards.");
+      const message = err instanceof Error ? err.message : "Failed to generate flashcards.";
+      setSaveMessage(message);
+      setTimeout(() => setSaveMessage(""), 3500);
     } finally {
       setIsGeneratingFlashcards(false);
     }
@@ -822,13 +884,7 @@ const NoteApp = () => {
     setIsGeneratingPodcast(true);
     setPodcastScenario(scenario);
     try {
-      const response = await fetch(`${API_BASE}/podcast`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ markdown, language: podcastLanguage, scenario }),
-      });
-      if (!response.ok) throw new Error("Failed to generate podcast");
-      const data = await response.json();
+      const data = await postJsonWithRetry<{ url: string }>("/podcast", { markdown, language: podcastLanguage, scenario }, "Failed to generate podcast");
       
       if (scenario === "podcast") {
         setAiPodcastUrl(data.url);
@@ -840,8 +896,9 @@ const NoteApp = () => {
       setActiveArtifact("audio");
       setIsArtifactConsoleOpen(true);
     } catch (err) {
-      console.error(err);
-      alert("Failed to generate podcast.");
+      const message = err instanceof Error ? err.message : "Failed to generate podcast.";
+      setSaveMessage(message);
+      setTimeout(() => setSaveMessage(""), 3500);
     } finally {
       setIsGeneratingPodcast(false);
     }
@@ -849,6 +906,8 @@ const NoteApp = () => {
 
   const resetWorkspace = () => {
     setIsPlaying(false);
+    setIsSourcePinned(false);
+    setPendingSeekSeconds(null);
     setMarkdown(null);
     setCheatsheet([]);
     setMindmap(null);
@@ -866,6 +925,8 @@ const NoteApp = () => {
 
   const closeCurrentNoteToLibrary = () => {
     setIsPlaying(false);
+    setIsSourcePinned(false);
+    setPendingSeekSeconds(null);
     setMarkdown(null);
     setCheatsheet([]);
     setMindmap(null);
@@ -919,15 +980,20 @@ const NoteApp = () => {
           <div className={styles.flashcardInner}>
             <div className={styles.flashcardFront}>
               <div className={styles.flashcardLabel}>Question</div>
-              <div className={styles.flashcardText}>{flashcards[flashcardIndex].question}</div>
+              <div className={styles.flashcardText}>
+                <FlashcardRichText text={flashcards[flashcardIndex].question} />
+              </div>
               <div className={styles.flipHint}><RotateCcw size={14} /> Click to flip</div>
             </div>
             <div className={styles.flashcardBack}>
               <div className={styles.flashcardLabel}>Answer</div>
-              <div className={styles.flashcardText}>{flashcards[flashcardIndex].answer}</div>
+              <div className={styles.flashcardText}>
+                <FlashcardRichText text={flashcards[flashcardIndex].answer} />
+              </div>
               {isFlipped && flashcards[flashcardIndex].explanation && (
                 <div className={styles.flashcardExplanation} style={{ opacity: showFlashcardExplanation ? 1 : 0 }}>
-                  <strong>Explanation:</strong> {flashcards[flashcardIndex].explanation}
+                  <strong>Explanation:</strong>
+                  <FlashcardRichText text={flashcards[flashcardIndex].explanation || ""} />
                 </div>
               )}
               <div className={styles.flipHint}>
@@ -975,7 +1041,7 @@ const NoteApp = () => {
     URL.revokeObjectURL(url);
   };
 
-  const renderMindmapToCanvas = async () => {
+  const serializeMindmapSvg = () => {
     const svg = mindmapSvgRef.current;
     if (!svg) throw new Error("Mind map is not ready yet.");
 
@@ -983,10 +1049,18 @@ const NoteApp = () => {
     clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
     clone.setAttribute("width", "1600");
     clone.setAttribute("height", "1000");
-    const svgText = new XMLSerializer().serializeToString(clone);
-    const blob = new Blob([svgText], { type: "image/svg+xml;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
+    clone.setAttribute("viewBox", "0 0 1600 1000");
 
+    const background = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    background.setAttribute("width", "1600");
+    background.setAttribute("height", "1000");
+    background.setAttribute("fill", "#fffefa");
+    clone.insertBefore(background, clone.firstChild);
+
+    return new XMLSerializer().serializeToString(clone);
+  };
+
+  const svgDataUrlToCanvas = async (svgUrl: string) => {
     return await new Promise<HTMLCanvasElement>((resolve, reject) => {
       const image = new Image();
       image.onload = () => {
@@ -995,36 +1069,52 @@ const NoteApp = () => {
         canvas.height = 1000;
         const ctx = canvas.getContext("2d");
         if (!ctx) {
-          URL.revokeObjectURL(url);
           reject(new Error("Could not prepare export canvas."));
           return;
         }
-        ctx.fillStyle = "#ffffff";
+        ctx.fillStyle = "#fffefa";
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
-        URL.revokeObjectURL(url);
         resolve(canvas);
       };
-      image.onerror = () => {
-        URL.revokeObjectURL(url);
-        reject(new Error("Could not render mind map export."));
-      };
-      image.src = url;
+      image.onerror = () => reject(new Error("Could not render mind map export."));
+      image.src = svgUrl;
     });
   };
+
+  const renderMindmapToCanvas = async () => {
+    const svgText = serializeMindmapSvg();
+    const svgUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgText)}`;
+    return await svgDataUrlToCanvas(svgUrl);
+  };
+
+  const canvasToPngBlob = async (canvas: HTMLCanvasElement) => (
+    await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob((blob) => {
+        if (blob) resolve(blob);
+        else reject(new Error("Could not prepare PNG file."));
+      }, "image/png");
+    })
+  );
 
   const exportMindmapAsPng = async () => {
     try {
       const canvas = await renderMindmapToCanvas();
-      canvas.toBlob((blob) => {
-        if (blob) downloadBlob(blob, `${noteTitle || "notejam"}-mind-map.png`);
-      }, "image/png");
+      downloadBlob(await canvasToPngBlob(canvas), `${noteTitle || "notejam"}-mind-map.png`);
     } catch (err) {
       console.error(err);
       alert("Could not export mind map image.");
     }
   };
 
+  const exportMindmapAsSvg = () => {
+    try {
+      downloadBlob(new Blob([serializeMindmapSvg()], { type: "image/svg+xml;charset=utf-8" }), `${noteTitle || "notejam"}-mind-map.svg`);
+    } catch (err) {
+      console.error(err);
+      alert("Could not export mind map SVG.");
+    }
+  };
   const createPdfFromJpeg = (jpegBytes: Uint8Array) => {
     const parts: BlobPart[] = [];
     const offsets: number[] = [];
@@ -1084,237 +1174,484 @@ const NoteApp = () => {
       );
     }
 
-    const allNodes = mindmap.nodes;
-    const allIds = new Set(allNodes.map((node) => node.id));
-    const validLinks = mindmap.links.filter((link) => (
-      allIds.has(getMindmapNodeId(link.source)) && allIds.has(getMindmapNodeId(link.target))
-    ));
-    const degree = new Map<string, number>();
-    allNodes.forEach((node) => degree.set(node.id, 0));
-    validLinks.forEach((link) => {
-      const source = getMindmapNodeId(link.source);
-      const target = getMindmapNodeId(link.target);
-      degree.set(source, (degree.get(source) || 0) + 1);
-      degree.set(target, (degree.get(target) || 0) + 1);
-    });
-
-    const root = [...allNodes].sort((a, b) => (degree.get(b.id) || 0) - (degree.get(a.id) || 0))[0] || allNodes[0];
-    const rootId = root.id;
-    const nodesById = new Map(allNodes.map((node) => [node.id, node]));
-    const adjacency = new Map<string, string[]>();
-    allNodes.forEach((node) => adjacency.set(node.id, []));
-    validLinks.forEach((link) => {
-      const source = getMindmapNodeId(link.source);
-      const target = getMindmapNodeId(link.target);
-      adjacency.get(source)?.push(target);
-      adjacency.get(target)?.push(source);
-    });
-    adjacency.forEach((neighbors, nodeId) => {
-      adjacency.set(nodeId, [...new Set(neighbors)].sort((a, b) => (degree.get(b) || 0) - (degree.get(a) || 0)));
-    });
-
-    const children = new Map<string, string[]>();
-    allNodes.forEach((node) => children.set(node.id, []));
-    const queue = [rootId];
-    const visited = new Set([rootId]);
-    while (queue.length > 0) {
-      const current = queue.shift()!;
-      (adjacency.get(current) || []).forEach((next) => {
-        if (visited.has(next)) return;
-        visited.add(next);
-        children.get(current)?.push(next);
-        queue.push(next);
-      });
-    }
-    allNodes
-      .filter((node) => !visited.has(node.id) && node.id !== rootId)
-      .sort((a, b) => (degree.get(b.id) || 0) - (degree.get(a.id) || 0))
-      .forEach((node) => {
-        children.get(rootId)?.push(node.id);
-      });
-
-    const sectionIds = (children.get(rootId) || []).slice(0, 7);
-    const fallbackSections = [...allNodes]
-      .filter((node) => node.id !== rootId && !sectionIds.includes(node.id))
-      .sort((a, b) => (degree.get(b.id) || 0) - (degree.get(a.id) || 0))
-      .slice(0, 7 - sectionIds.length)
-      .map((node) => node.id);
-    const finalSectionIds = [...sectionIds, ...fallbackSections].slice(0, 6);
-    const palette = ["#1557c2", "#16803b", "#f97316", "#0f5cc5", "#7e22ce", "#ef233c"];
-    const slots = [
-      { x: 600, y: 30, w: 360, h: 230, cx: 780, cy: 260, color: palette[0], icon: "▣" },
-      { x: 980, y: 60, w: 560, h: 300, cx: 980, cy: 210, color: palette[1], icon: "◎" },
-      { x: 1040, y: 395, w: 500, h: 220, cx: 1040, cy: 505, color: palette[2], icon: "⚖" },
-      { x: 965, y: 660, w: 520, h: 150, cx: 965, cy: 735, color: palette[3], icon: "↩" },
-      { x: 55, y: 650, w: 620, h: 160, cx: 675, cy: 730, color: palette[4], icon: "⚙" },
-      { x: 45, y: 350, w: 520, h: 230, cx: 565, cy: 465, color: palette[5], icon: "✦" },
-      { x: 60, y: 70, w: 470, h: 210, cx: 530, cy: 175, color: palette[6], icon: "↻" }
-    ];
-
-    void slots;
-    const infographicSlots = [
-      { x: 575, y: 48, w: 450, h: 218, cx: 800, cy: 266, color: palette[0] },
-      { x: 1035, y: 86, w: 500, h: 250, cx: 1035, cy: 212, color: palette[1] },
-      { x: 1035, y: 390, w: 500, h: 220, cx: 1035, cy: 500, color: palette[2] },
-      { x: 910, y: 664, w: 545, h: 166, cx: 910, cy: 748, color: palette[3] },
-      { x: 145, y: 664, w: 545, h: 166, cx: 690, cy: 748, color: palette[4] },
-      { x: 65, y: 350, w: 505, h: 245, cx: 570, cy: 472, color: palette[5] }
-    ];
-
-    const getBullets = (sectionId: string) => {
-      const direct = (children.get(sectionId) || []).map((id) => nodesById.get(id)?.id).filter(Boolean) as string[];
-      const related = (adjacency.get(sectionId) || [])
-        .filter((id) => id !== rootId && id !== sectionId)
-        .map((id) => nodesById.get(id)?.id)
-        .filter(Boolean) as string[];
-      return [...new Set([...direct, ...related])].slice(0, 4);
+    type RevisionSheet = {
+      title: string;
+      centralConcept: string;
+      thesis: string;
+      sections: RevisionMindmapSection[];
+      examples: RevisionMindmapFact[];
+      formulas: RevisionMindmapFact[];
+      takeaways: string[];
+      flow: string[];
     };
-    const shortTitle = (text: string) => text.replace(/\s*\([^)]*\)\s*/g, " ").replace(/\s+/g, " ").trim();
-    const clampText = (text: string, maxLength: number) => (
-      text.length > maxLength ? `${text.slice(0, maxLength - 1).trim()}...` : text
-    );
-    const sections = finalSectionIds.map((id, index) => ({
-      id,
-      title: clampText(shortTitle(nodesById.get(id)?.id || id), 42),
-      bullets: getBullets(id),
-      slot: infographicSlots[index]
-    }));
+    type PlannedSection = {
+      id: string;
+      title: string;
+      cue: string;
+      kind: string;
+      icon: string;
+      importance: number;
+      bullets: string[];
+      formulas: string[];
+      examples: string[];
+      x: number;
+      y: number;
+      w: number;
+      h: number;
+      rotate: number;
+      shape: "note" | "bubble" | "tag" | "formula" | "ticket" | "torn";
+      connector: { sx: number; sy: number; cx: number; cy: number; ex: number; ey: number };
+      titleLines: string[];
+      bulletLines: string[][];
+      formulaLines: string[][];
+      exampleLines: string[][];
+    };
 
-    const renderTextLines = (text: string, x: number, y: number, maxChars: number, lineHeight: number, className: string, maxLines = 3) => {
-      const allLines = wrapSvgText(text, maxChars);
-      const visibleLines = allLines.slice(0, maxLines).map((line, index) => (
-        index === maxLines - 1 && allLines.length > maxLines ? clampText(line, Math.max(8, maxChars - 2)) : line
+    const SVG_WIDTH = 1600;
+    const PAPER_MARGIN = 64;
+    const center = { x: 800, y: 458, w: 390, h: 238 };
+    const placeholderPattern = /^(key idea|main relationship|exam revision point|review this core point|important concept|core concept|important point)$/i;
+    const stopWords = new Set(["a", "an", "and", "are", "as", "by", "for", "from", "how", "in", "into", "is", "of", "on", "or", "the", "to", "with", "using", "solving"]);
+
+    const clampText = (text: string, maxLength: number) => {
+      const clean = String(text || "").trim();
+      return clean.length > maxLength ? `${clean.slice(0, Math.max(0, maxLength - 1)).trim()}...` : clean;
+    };
+    const cleanText = (value: unknown, fallback = "") => (
+      String(value || fallback)
+        .replace(/[`*_#]/g, "")
+        .replace(/\$+/g, "")
+        .replace(/\\([A-Za-z]+)/g, "$1")
+        .replace(/\s+/g, " ")
+        .trim()
+    );
+    const hashText = (value: string) => [...value].reduce((hash, char) => ((hash * 31 + char.charCodeAt(0)) % 9973), 17);
+    const jitter = (seed: string, amount: number, step = 0) => (((hashText(`${seed}-${step}`) % 200) / 100) - 1) * amount;
+    const removeLongParenthetical = (text: string) => text.replace(/\s*\([^)]{20,}\)\s*/g, " ").replace(/\s+/g, " ").trim();
+    const smartTitle = (text: string, max = 30) => {
+      const cleaned = removeLongParenthetical(cleanText(text))
+        .replace(/\s+and\s+/gi, " & ")
+        .replace(/\s*[:;-]\s*$/g, "")
+        .trim();
+      return clampText(cleaned, max);
+    };
+    const centralTitle = (text: string) => {
+      const cleaned = removeLongParenthetical(cleanText(text, "Study Map"))
+        .replace(/\s+for\s+.+$/i, "")
+        .replace(/\s+using\s+.+$/i, "")
+        .replace(/\s+with\s+.+$/i, "")
+        .replace(/\s*[:;-].+$/g, "")
+        .trim();
+      if (cleaned.length <= 26 && cleaned.split(" ").length <= 4) return cleaned;
+      const words = cleaned.split(" ").filter(Boolean);
+      const meaningful = words.filter((word) => !stopWords.has(word.toLowerCase()));
+      const chosen = (meaningful.length >= 2 ? meaningful : words).slice(0, 3).join(" ").replace(/\.\.\.$/, "");
+      return chosen || "Study Map";
+    };
+    const wrapLines = (text: string, maxChars: number, maxLines = 3) => {
+      const words = cleanText(text).split(" ").filter(Boolean);
+      const lines: string[] = [];
+      let current = "";
+      words.forEach((word) => {
+        const safeWord = word.length > maxChars ? `${word.slice(0, maxChars - 1)}-` : word;
+        const candidate = current ? `${current} ${safeWord}` : safeWord;
+        if (candidate.length > maxChars && current) {
+          lines.push(current);
+          current = safeWord;
+        } else {
+          current = candidate;
+        }
+      });
+      if (current) lines.push(current);
+      if (lines.length > maxLines) {
+        const kept = lines.slice(0, maxLines);
+        kept[maxLines - 1] = clampText(kept[maxLines - 1], Math.max(8, maxChars - 2));
+        return kept;
+      }
+      return lines.length > 0 ? lines : [""];
+    };
+    const cleanList = (items: unknown[] | undefined, maxItems: number, maxLength: number) => (
+      (items || [])
+        .map((item) => clampText(cleanText(item), maxLength))
+        .filter((item) => item && !placeholderPattern.test(item))
+        .slice(0, maxItems)
+    );
+
+    const ContentExtractor = (): RevisionSheet => {
+      if (mindmap.sections && mindmap.sections.length > 0) {
+        return {
+          title: smartTitle(mindmap.title || mindmap.centralConcept || "Study Map", 44),
+          centralConcept: centralTitle(mindmap.centralConcept || mindmap.title || "Study Map"),
+          thesis: clampText(cleanText(mindmap.thesis || "Connect the core idea before revising details."), 84),
+          sections: mindmap.sections,
+          examples: (mindmap.examples || []).map((item) => ({ label: cleanText(item.label), detail: cleanText(item.detail) })),
+          formulas: mindmap.formulas || mindmap.results || [],
+          takeaways: mindmap.takeaways || (mindmap.footer ? [mindmap.footer] : []),
+          flow: mindmap.flow || [],
+        };
+      }
+
+      if (mindmap.branches && mindmap.branches.length > 0) {
+        return {
+          title: smartTitle(mindmap.title || "Study Map", 44),
+          centralConcept: centralTitle(mindmap.title || "Study Map"),
+          thesis: clampText(cleanText((mindmap.centerSummary || []).join("; ") || mindmap.footer || "One-page revision of the core lecture ideas."), 84),
+          sections: mindmap.branches.map((branch, index) => ({
+            title: branch.title,
+            cue: branch.prompt || ["What is it?", "Why matter?", "How used?"][index % 3],
+            kind: "definition",
+            importance: 8 - index,
+            icon: branch.icon,
+            bullets: branch.bullets,
+          })),
+          examples: (mindmap.examples || []).map((item) => ({ label: cleanText(item.label), detail: cleanText(item.detail) })),
+          formulas: mindmap.results || [],
+          takeaways: mindmap.footer ? [mindmap.footer] : [],
+          flow: mindmap.flow || [],
+        };
+      }
+
+      const allNodes = mindmap.nodes || [];
+      const allIds = new Set(allNodes.map((node) => node.id));
+      const validLinks = (mindmap.links || []).filter((link) => (
+        allIds.has(getMindmapNodeId(link.source)) && allIds.has(getMindmapNodeId(link.target))
       ));
+      const degree = new Map<string, number>();
+      allNodes.forEach((node) => degree.set(node.id, 0));
+      validLinks.forEach((link) => {
+        const source = getMindmapNodeId(link.source);
+        const target = getMindmapNodeId(link.target);
+        degree.set(source, (degree.get(source) || 0) + 1);
+        degree.set(target, (degree.get(target) || 0) + 1);
+      });
+      const root = [...allNodes].sort((a, b) => (degree.get(b.id) || 0) - (degree.get(a.id) || 0))[0] || { id: "Study Map" };
+      const adjacency = new Map<string, string[]>();
+      allNodes.forEach((node) => adjacency.set(node.id, []));
+      validLinks.forEach((link) => {
+        const source = getMindmapNodeId(link.source);
+        const target = getMindmapNodeId(link.target);
+        adjacency.get(source)?.push(target);
+        adjacency.get(target)?.push(source);
+      });
+      const sections = (adjacency.get(root.id) || []).slice(0, 6).map((id, index) => ({
+        title: id,
+        cue: ["What is it?", "Why matter?", "How used?"][index % 3],
+        kind: "definition",
+        importance: 7 - index,
+        icon: ["speech", "bulb", "gear", "formula", "target", "chart"][index % 6],
+        bullets: (adjacency.get(id) || []).filter((item) => item !== root.id).slice(0, 3),
+      }));
+      return {
+        title: smartTitle(root.id, 44),
+        centralConcept: centralTitle(root.id),
+        thesis: "A quick visual path through the most connected concepts.",
+        sections,
+        examples: [],
+        formulas: [],
+        takeaways: [],
+        flow: sections.map((section) => smartTitle(section.title, 12)),
+      };
+    };
+
+    const IconSelector = (section: RevisionMindmapSection, index: number) => {
+      const text = `${section.title || ""} ${section.kind || ""} ${(section.bullets || []).join(" ")}`.toLowerCase();
+      if (section.icon) return section.icon;
+      if (/formula|equation|matrix|probability|law|rule|axiom/.test(text)) return "formula";
+      if (/example|case|sample|coin|dice|experiment/.test(text)) return "dice";
+      if (/process|step|algorithm|workflow|method/.test(text)) return "arrow";
+      if (/warning|fail|error|risk|condition/.test(text)) return "target";
+      if (/component|system|architecture|computer|code/.test(text)) return "code";
+      return ["speech", "bulb", "gear", "book", "target", "chart"][index % 6];
+    };
+
+    const InformationArchitect = (sheet: RevisionSheet) => {
+      const rawDensity = sheet.sections.reduce((score, section) => {
+        const titleScore = cleanText(section.title).length > 24 ? 1 : 0;
+        const bulletScore = (section.bullets || []).filter((bullet) => cleanText(bullet).length > 42).length;
+        const formulaScore = (section.formulas || []).length * 1.4;
+        return score + titleScore + bulletScore + formulaScore;
+      }, 0);
+      const visibleSectionCount = rawDensity > 7 ? 5 : 6;
+      const sections = [...sheet.sections]
+        .map((section, index) => {
+          const kind = section.kind || "definition";
+          const formulas = cleanList(section.formulas, kind === "formula" ? 2 : 1, 34);
+          const examples = cleanList(section.examples, 1, 40);
+          const bullets = cleanList(section.bullets, formulas.length > 0 ? 2 : 3, 48);
+          const importance = Math.max(1, Math.min(10, Number(section.importance || 6) + (formulas.length ? 1 : 0)));
+          return {
+            ...section,
+            title: smartTitle(section.title || `Topic ${index + 1}`, 28),
+            cue: smartTitle(section.cue || ["What is it?", "Why?", "How?", "When?", "Watch for?", "Example?"][index % 6], 24),
+            kind,
+            importance,
+            icon: IconSelector(section, index),
+            bullets: bullets.length > 0 ? bullets : examples.slice(0, 1),
+            formulas,
+            examples,
+          };
+        })
+        .filter((section) => section.title)
+        .sort((a, b) => (b.importance || 5) - (a.importance || 5))
+        .slice(0, visibleSectionCount);
+
+      return {
+        ...sheet,
+        centralConcept: centralTitle(sheet.centralConcept || sheet.title),
+        thesis: clampText(cleanText(sheet.thesis), 84),
+        sections,
+        examples: (sheet.examples || []).map((item) => ({ label: smartTitle(item.label, 22), detail: clampText(cleanText(item.detail), 34) })).filter((item) => item.label).slice(0, 3),
+        formulas: (sheet.formulas || []).map((item) => ({ label: smartTitle(item.label, 22), detail: clampText(cleanText(item.detail), 34) })).filter((item) => item.label).slice(0, 3),
+        takeaways: cleanList(sheet.takeaways, 2, 68),
+        flow: cleanList(sheet.flow, 5, 16),
+      };
+    };
+
+    const BoxSizer = (section: ReturnType<typeof InformationArchitect>["sections"][number], baseWidth: number) => {
+      const titleWeight = Math.max(0, section.title.length - 18);
+      const formulaWeight = (section.formulas || []).join(" ").length;
+      const width = Math.max(320, Math.min(455, baseWidth + Math.min(62, titleWeight * 4 + formulaWeight * 0.55)));
+      const titleChars = Math.max(15, Math.floor((width - 76) / 13.2));
+      const bodyChars = Math.max(23, Math.floor((width - 88) / 9.4));
+      const titleLines = wrapLines(section.title.toUpperCase(), titleChars, 2);
+      const bulletLines = (section.bullets || []).slice(0, section.formulas?.length ? 2 : 3).map((bullet) => wrapLines(bullet, bodyChars, 2));
+      const formulaLines = (section.formulas || []).slice(0, 2).map((formula) => wrapLines(formula, Math.floor((width - 118) / 8.8), 1));
+      const exampleLines = (section.examples || []).slice(0, 1).map((example) => wrapLines(example, Math.floor((width - 118) / 8.8), 1));
+      const bodyLineCount = bulletLines.reduce((sum, lines) => sum + lines.length, 0);
+      const chipLineCount = formulaLines.length + exampleLines.length;
+      const desiredHeight = 92 + titleLines.length * 25 + bodyLineCount * 24 + chipLineCount * 38;
+      const height = Math.max(150, Math.min(242, desiredHeight));
+      return { width, height, titleLines, bulletLines, formulaLines, exampleLines };
+    };
+
+    const LayoutPlanner = (sheet: ReturnType<typeof InformationArchitect>) => {
+      const slotCatalog = [
+        { x: 122, y: 120, w: 386, side: "left", shape: "torn" as const, rotate: -2.1 },
+        { x: 1092, y: 130, w: 390, side: "right", shape: "bubble" as const, rotate: 1.35 },
+        { x: 94, y: 438, w: 370, side: "left", shape: "formula" as const, rotate: 1.0 },
+        { x: 1138, y: 426, w: 370, side: "right", shape: "note" as const, rotate: -1.15 },
+        { x: 270, y: 690, w: 384, side: "left", shape: "ticket" as const, rotate: -0.85 },
+        { x: 942, y: 684, w: 384, side: "right", shape: "tag" as const, rotate: 1.15 },
+      ];
+      const usedSlots = sheet.sections.length === 5
+        ? [slotCatalog[0], slotCatalog[1], slotCatalog[2], slotCatalog[3], { ...slotCatalog[4], x: 606, y: 722, side: "center", w: 392, rotate: -0.3 }]
+        : slotCatalog;
+
+      return sheet.sections.map((section, index) => {
+        const slot = usedSlots[index];
+        const measured = BoxSizer(section, slot.w);
+        const side = slot.side as "left" | "right" | "center";
+        const x = Math.max(PAPER_MARGIN + 20, Math.min(SVG_WIDTH - PAPER_MARGIN - measured.width - 20, slot.x + jitter(section.title, side === "center" ? 8 : 14, 1)));
+        const y = Math.max(98, Math.min(760, slot.y + jitter(section.title, 10, 2)));
+        const sx = side === "left" ? center.x - center.w * 0.46 : side === "right" ? center.x + center.w * 0.46 : center.x;
+        const sy = index < 2 ? center.y - center.h * 0.38 : index < 4 ? center.y + 8 : center.y + center.h * 0.43;
+        const ex = side === "left" ? x + measured.width + 10 : side === "right" ? x - 10 : x + measured.width / 2;
+        const ey = side === "center" ? y - 8 : y + measured.height * 0.46;
+        const cxBias = side === "left" ? -70 : side === "right" ? 70 : 0;
+        return {
+          id: `${section.title}-${index}`,
+          title: section.title,
+          cue: section.cue || "Key idea",
+          kind: section.kind || "definition",
+          icon: section.icon || slot.shape,
+          importance: section.importance || 5,
+          bullets: section.bullets || [],
+          formulas: section.formulas || [],
+          examples: section.examples || [],
+          x,
+          y,
+          w: measured.width,
+          h: measured.height,
+          rotate: slot.rotate + jitter(section.title, 0.35, 3),
+          shape: section.kind === "formula" ? "formula" : slot.shape,
+          connector: { sx, sy, cx: (sx + ex) / 2 + cxBias + jitter(section.title, 22, 4), cy: (sy + ey) / 2 + jitter(section.title, 28, 5), ex, ey },
+          titleLines: measured.titleLines,
+          bulletLines: measured.bulletLines,
+          formulaLines: measured.formulaLines,
+          exampleLines: measured.exampleLines,
+        };
+      });
+    };
+    const sheet = InformationArchitect(ContentExtractor());
+    const plannedSections = LayoutPlanner(sheet);
+    const centralLines = wrapLines(sheet.centralConcept.toUpperCase(), sheet.centralConcept.length > 18 ? 14 : 18, 2);
+    const centralFontSize = centralLines.length > 1 ? (Math.max(...centralLines.map((line) => line.length)) > 14 ? 42 : 46) : 54;
+    const centralBullets = [sheet.thesis, ...sheet.flow.slice(0, 3)].filter(Boolean).map((item) => clampText(cleanText(item), 36)).slice(0, 4);
+    const supportItems = [...sheet.formulas.map((item) => ({ ...item, label: `Rule: ${item.label}` })), ...sheet.examples.map((item) => ({ ...item, label: `Ex: ${item.label}` }))].slice(0, 3);
+
+    const renderTextLines = (lines: string[] | string, x: number, y: number, lineHeight: number, className: string, anchor: "start" | "middle" | "end" = "start", style?: React.CSSProperties) => {
+      const safeLines = Array.isArray(lines) ? lines : wrapLines(lines, 32, 3);
       return (
-        <text x={x} y={y} className={className}>
-          {visibleLines.map((line, lineIndex) => (
-            <tspan key={`${line}-${lineIndex}`} x={x} dy={lineIndex === 0 ? 0 : lineHeight}>
-              {line}
-            </tspan>
+        <text x={x} y={y} className={className} textAnchor={anchor} style={style}>
+          {safeLines.map((line, lineIndex) => (
+            <tspan key={`${line}-${lineIndex}`} x={x} dy={lineIndex === 0 ? 0 : lineHeight}>{line}</tspan>
           ))}
         </text>
       );
     };
 
-    const renderBulletList = (bullets: string[], slot: typeof infographicSlots[number]) => {
-      const usableBullets = (bullets.length > 0 ? bullets : ["Key idea", "Main relationship", "Exam revision point"]).slice(0, 4);
-      const maxChars = Math.max(24, Math.floor(slot.w / 16));
-      const maxY = slot.y + slot.h - 24;
-      let cursorY = slot.y + 96;
-      const rendered: Array<ReturnType<typeof renderTextLines>> = [];
-
-      usableBullets.forEach((bullet, bulletIndex) => {
-        const lines = wrapSvgText(clampText(bullet, 76), maxChars).slice(0, 2);
-        const blockHeight = lines.length * 22 + 12;
-        if (cursorY + blockHeight > maxY) return;
-
-        rendered.push(
-          <g key={`${slot.x}-${bullet}-${bulletIndex}`}>
-            <circle cx={slot.x + 42} cy={cursorY - 6} r="4.5" fill="#111827" />
-            {lines.map((line, lineIndex) => (
-              <text
-                key={`${line}-${lineIndex}`}
-                x={slot.x + 62}
-                y={cursorY + lineIndex * 22}
-                className="mindmapBulletText"
-              >
-                {line}
-              </text>
-            ))}
-          </g>
-        );
-        cursorY += blockHeight;
-      });
-
-      return rendered;
+    const SketchRenderer = {
+      cardPath: (x: number, y: number, w: number, h: number, seed: string, shape: PlannedSection["shape"]) => {
+        if (shape === "torn") {
+          return `M ${x + 24} ${y + 8} C ${x + 118} ${y - 6 + jitter(seed, 5, 1)}, ${x + w - 118} ${y + 14}, ${x + w - 20} ${y + 4} L ${x + w - 8} ${y + h - 24} C ${x + w - 98} ${y + h + 6}, ${x + 112} ${y + h - 4}, ${x + 22} ${y + h + 2} L ${x + 6} ${y + 38} Q ${x + 12} ${y + 16}, ${x + 24} ${y + 8} Z`;
+        }
+        if (shape === "ticket") {
+          return `M ${x + 28} ${y + 4} H ${x + w - 28} Q ${x + w - 4} ${y + 4}, ${x + w - 4} ${y + 30} Q ${x + w - 30} ${y + 43}, ${x + w - 4} ${y + 56} V ${y + h - 28} Q ${x + w - 8} ${y + h + 4}, ${x + w - 38} ${y + h - 2} H ${x + 34} Q ${x + 8} ${y + h + 4}, ${x + 4} ${y + h - 28} V ${y + 56} Q ${x + 30} ${y + 43}, ${x + 4} ${y + 30} Q ${x + 4} ${y + 4}, ${x + 28} ${y + 4} Z`;
+        }
+        if (shape === "formula") {
+          return `M ${x + 18} ${y + 12} Q ${x + w * 0.5} ${y - 12}, ${x + w - 18} ${y + 16} L ${x + w - 8} ${y + h - 18} Q ${x + w * 0.5} ${y + h + 10}, ${x + 18} ${y + h - 8} L ${x + 8} ${y + 18} Z`;
+        }
+        if (shape === "bubble") {
+          return `M ${x + 28} ${y + 14} C ${x + w * 0.28} ${y - 12 + jitter(seed, 4, 1)}, ${x + w * 0.72} ${y + 2}, ${x + w - 28} ${y + 16} Q ${x + w + 16} ${y + h * 0.45}, ${x + w - 24} ${y + h - 12} C ${x + w * 0.7} ${y + h + 12}, ${x + w * 0.34} ${y + h + 2}, ${x + 28} ${y + h - 10} Q ${x - 14} ${y + h * 0.5}, ${x + 28} ${y + 14} Z`;
+        }
+        if (shape === "tag") {
+          return `M ${x + 18} ${y + 6} L ${x + w - 22} ${y + 12} Q ${x + w + 8} ${y + h * 0.5}, ${x + w - 18} ${y + h - 10} L ${x + 20} ${y + h - 4} Q ${x - 12} ${y + h * 0.52}, ${x + 18} ${y + 6} Z`;
+        }
+        return `M ${x + 18} ${y + 8} C ${x + w * 0.34} ${y - 8 + jitter(seed, 4, 1)}, ${x + w * 0.68} ${y + 4}, ${x + w - 14} ${y + 12} Q ${x + w + 10} ${y + h * 0.45}, ${x + w - 10} ${y + h - 16} C ${x + w * 0.66} ${y + h + 8}, ${x + w * 0.3} ${y + h - 2}, ${x + 16} ${y + h - 10} Q ${x - 10} ${y + h * 0.46}, ${x + 18} ${y + 8} Z`;
+      },
+      cloudPath: () => "M 604 362 C 574 294, 656 252, 718 286 C 758 215, 856 226, 890 284 C 962 252, 1044 308, 1008 382 C 1082 418, 1050 512, 976 520 C 992 592, 892 636, 830 582 C 780 644, 682 608, 692 536 C 612 552, 552 482, 580 420 C 558 394, 574 368, 604 362 Z",
+      connector: (section: PlannedSection) => `M ${section.connector.sx} ${section.connector.sy} C ${section.connector.cx} ${section.connector.cy}, ${section.connector.cx} ${section.connector.cy}, ${section.connector.ex} ${section.connector.ey}`,
+    };
+    const renderIcon = (icon: string, x: number, y: number, scale = 1) => {
+      const common = { fill: "none", stroke: "#17202e", strokeWidth: 4 * scale, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
+      const sx = (n: number) => x + n * scale;
+      const sy = (n: number) => y + n * scale;
+      if (icon === "bulb") return <g><path {...common} d={`M ${sx(17)} ${sy(31)} C ${sx(8)} ${sy(12)}, ${sx(25)} ${sy(0)}, ${sx(40)} ${sy(13)} C ${sx(51)} ${sy(25)}, ${sx(38)} ${sy(36)}, ${sx(38)} ${sy(43)} L ${sx(18)} ${sy(43)} C ${sx(18)} ${sy(37)}, ${sx(19)} ${sy(34)}, ${sx(17)} ${sy(31)}`} /><path {...common} d={`M ${sx(20)} ${sy(51)} L ${sx(36)} ${sy(51)} M ${sx(23)} ${sy(59)} L ${sx(33)} ${sy(59)}`} /></g>;
+      if (icon === "gear") return <g><circle {...common} cx={sx(28)} cy={sy(31)} r={15 * scale} /><path {...common} d={`M ${sx(28)} ${sy(7)} V ${sy(0)} M ${sx(28)} ${sy(62)} V ${sy(54)} M ${sx(5)} ${sy(31)} H ${sx(0)} M ${sx(57)} ${sy(31)} H ${sx(51)}`} /></g>;
+      if (icon === "formula") return <text x={sx(4)} y={sy(43)} className="revisionIconText">fx</text>;
+      if (icon === "target") return <g><circle {...common} cx={sx(29)} cy={sy(31)} r={24 * scale} /><circle {...common} cx={sx(29)} cy={sy(31)} r={11 * scale} /><path {...common} d={`M ${sx(29)} ${sy(31)} L ${sx(60)} ${sy(0)}`} /></g>;
+      if (icon === "chart") return <g><path {...common} d={`M ${sx(6)} ${sy(55)} H ${sx(56)} M ${sx(15)} ${sy(49)} V ${sy(35)} M ${sx(30)} ${sy(49)} V ${sy(19)} M ${sx(45)} ${sy(49)} V ${sy(10)}`} /></g>;
+      if (icon === "code") return <g><path {...common} d={`M ${sx(21)} ${sy(17)} L ${sx(8)} ${sy(31)} L ${sx(21)} ${sy(45)} M ${sx(39)} ${sy(17)} L ${sx(52)} ${sy(31)} L ${sx(39)} ${sy(45)}`} /></g>;
+      if (icon === "dice") return <g><rect {...common} x={sx(8)} y={sy(10)} width={42 * scale} height={42 * scale} rx={7 * scale} /><circle cx={sx(21)} cy={sy(23)} r={3 * scale} fill="#17202e" /><circle cx={sx(37)} cy={sy(23)} r={3 * scale} fill="#17202e" /><circle cx={sx(29)} cy={sy(39)} r={3 * scale} fill="#17202e" /></g>;
+      if (icon === "arrow") return <g><path {...common} d={`M ${sx(4)} ${sy(46)} C ${sx(22)} ${sy(8)}, ${sx(42)} ${sy(8)}, ${sx(56)} ${sy(18)} M ${sx(56)} ${sy(18)} L ${sx(45)} ${sy(20)} M ${sx(56)} ${sy(18)} L ${sx(50)} ${sy(30)}`} /></g>;
+      return <g><path {...common} d={`M ${sx(7)} ${sy(14)} Q ${sx(30)} ${sy(0)}, ${sx(55)} ${sy(14)} V ${sy(38)} Q ${sx(55)} ${sy(51)}, ${sx(37)} ${sy(51)} L ${sx(21)} ${sy(61)} L ${sx(24)} ${sy(51)} Q ${sx(7)} ${sy(51)}, ${sx(7)} ${sy(38)} Z`} /></g>;
     };
 
-    const renderSection = (section: typeof sections[number], index: number) => {
-      const { slot } = section;
-      const headerHeight = 66;
+    const renderSection = (section: PlannedSection) => {
+      const titleBottom = section.y + 60 + (section.titleLines.length - 1) * 25;
+      const bodyStart = titleBottom + 34;
+      let cursorY = bodyStart;
       return (
         <g key={section.id}>
-          <rect x={slot.x} y={slot.y} width={slot.w} height={slot.h} rx="24" fill="#fffdfa" stroke={slot.color} strokeWidth="3" />
-          <rect x={slot.x + 30} y={slot.y - 18} width={slot.w - 44} height={headerHeight} rx="18" fill={slot.color} />
-          <circle cx={slot.x + 36} cy={slot.y + 15} r="34" fill="#ffffff" stroke={slot.color} strokeWidth="5" />
-          <text x={slot.x + 36} y={slot.y + 26} textAnchor="middle" className="mindmapIcon" fill={slot.color}>{index + 1}</text>
-          {renderTextLines(`${index + 1}. ${section.title.toUpperCase()}`, slot.x + 84, slot.y + 8, Math.max(16, Math.floor((slot.w - 110) / 15)), 23, "mindmapHeaderText", 2)}
-          {renderBulletList(section.bullets, slot)}
+          <path className="revisionConnector" d={SketchRenderer.connector(section)} />
+          <g transform={`rotate(${section.rotate} ${section.x + section.w / 2} ${section.y + section.h / 2})`}>
+            <path className="revisionNoteFill" d={SketchRenderer.cardPath(section.x, section.y, section.w, section.h, section.id, section.shape)} />
+            {renderIcon(section.icon, section.x + 16, section.y - 48, 0.72)}
+            <text x={section.x + 72} y={section.y - 18} className="revisionCue">{section.cue}</text>
+            {renderTextLines(section.titleLines, section.x + 30, section.y + 38, 25, "revisionSectionTitle")}
+            <path className="revisionUnderline" d={`M ${section.x + 30} ${titleBottom} C ${section.x + 132} ${titleBottom - 5}, ${section.x + 254} ${titleBottom + 4}, ${section.x + section.w - 30} ${titleBottom - 1}`} />
+            {section.bulletLines.map((lines, bulletIndex) => {
+              const y = cursorY;
+              cursorY += lines.length * 22 + 3;
+              return (
+                <g key={`${section.id}-bullet-${bulletIndex}`}>
+                  <circle cx={section.x + 42} cy={y - 6} r="4" fill="#17202e" />
+                  {renderTextLines(lines, section.x + 58, y, 21, "revisionBullet")}
+                </g>
+              );
+            })}
+            {[...section.formulaLines, ...section.exampleLines].slice(0, 2).map((lines, index) => {
+              const y = Math.min(section.y + section.h - 34, Math.max(cursorY + 12 + index * 34, section.y + section.h - 74 + index * 34));
+              return (
+                <g key={`${section.id}-chip-${index}`}>
+                  <path className="revisionMiniCard" d={SketchRenderer.cardPath(section.x + 38, y - 21, section.w - 76, 28, `${section.id}-chip-${index}`, "tag")} />
+                  {renderTextLines(lines, section.x + section.w / 2, y, 17, "revisionMiniText", "middle")}
+                </g>
+              );
+            })}
+          </g>
         </g>
       );
     };
-    const flowSummary = sections.slice(0, 5).map((section) => section.title.split(" ")[0]).join("  >  ");
 
     return (
       <div className={`${styles.mindmapInfographicShell} ${isExpanded ? styles.mindmapInfographicExpanded : ""}`}>
         <div className={styles.mindmapExportBar}>
-          <span>One-page polished mind map</span>
+          <span>Vector revision sheet</span>
           <div>
             <button onClick={exportMindmapAsPng}><Download size={15} /> PNG</button>
             <button onClick={exportMindmapAsPdf}><Download size={15} /> PDF</button>
+            <button onClick={exportMindmapAsSvg}><Download size={15} /> SVG</button>
           </div>
         </div>
-        <svg ref={mindmapSvgRef} className={styles.mindmapInfographic} viewBox="0 0 1600 1000" role="img" aria-label={`${root.id} mind map`}>
+        <svg ref={mindmapSvgRef} className={styles.mindmapInfographic} viewBox="0 0 1600 1000" role="img" aria-label={`${sheet.title} mind map`}>
           <style>{`
-            .mindmapHeaderText{font:900 25px Arial, sans-serif;fill:#fff;letter-spacing:.2px}
-            .mindmapBulletText{font:800 19px Arial, sans-serif;fill:#111827}
-            .mindmapIcon{font:900 30px Arial, sans-serif}
-            .mindmapCenterTitle{font:900 34px Arial, sans-serif;fill:#fff;letter-spacing:.5px}
-            .mindmapCenterSub{font:900 18px Arial, sans-serif;fill:#111827}
-            .mindmapTiny{font:900 18px Arial, sans-serif;fill:#0f172a}
-            .mindmapFlow{font:900 24px Arial, sans-serif;fill:#fff;letter-spacing:.5px}
+            .revisionPaper{fill:#fffdf7}
+            .revisionGrid{stroke:#17202e;stroke-width:1;opacity:.04}
+            .revisionInk{fill:none;stroke:#17202e;stroke-width:4;stroke-linecap:round;stroke-linejoin:round}
+            .revisionCloud{fill:#fffdf7;stroke:#17202e;stroke-width:4;stroke-linecap:round;stroke-linejoin:round}
+            .revisionConnector{fill:none;stroke:#17202e;stroke-width:3.8;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:10 12;opacity:.68}
+            .revisionNoteFill{fill:rgba(255,255,255,.76);stroke:#17202e;stroke-width:4;stroke-linecap:round;stroke-linejoin:round}
+            .revisionTitle{font:900 48px "Comic Sans MS", "Trebuchet MS", Arial, sans-serif;fill:#17202e;letter-spacing:.8px}
+            .revisionSubtitle{font:700 20px "Trebuchet MS", Arial, sans-serif;fill:#334155}
+            .revisionCue{font:900 18px "Comic Sans MS", "Trebuchet MS", Arial, sans-serif;fill:#17202e}
+            .revisionSectionTitle{font:900 26px "Trebuchet MS", Arial, sans-serif;fill:#17202e;letter-spacing:.2px}
+            .revisionBullet{font:700 18px "Trebuchet MS", Arial, sans-serif;fill:#17202e}
+            .revisionMiniText{font:800 15px "Trebuchet MS", Arial, sans-serif;fill:#17202e}
+            .revisionSmall{font:800 17px "Trebuchet MS", Arial, sans-serif;fill:#17202e}
+            .revisionTiny{font:800 14px "Trebuchet MS", Arial, sans-serif;fill:#17202e}
+            .revisionIconText{font:900 34px "Comic Sans MS", "Trebuchet MS", Arial, sans-serif;fill:#17202e}
+            .revisionUnderline{fill:none;stroke:#17202e;stroke-width:3.5;stroke-linecap:round}
+            .revisionMiniCard{fill:#fffdf7;stroke:#17202e;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
+            .revisionBottomRule{fill:#fffdf7;stroke:#17202e;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}
+            .revisionDoodle{fill:none;stroke:#17202e;stroke-width:3;stroke-linecap:round;stroke-linejoin:round;opacity:.7}
+            .revisionDoodleDot{fill:#17202e;opacity:.55}
           `}</style>
-          <rect width="1600" height="1000" rx="0" fill="#ffffff" />
-          <defs>
-            <filter id="mindmapShadow" x="-20%" y="-20%" width="140%" height="140%">
-              <feDropShadow dx="0" dy="12" stdDeviation="13" floodColor="#0f172a" floodOpacity="0.18" />
-            </filter>
-          </defs>
+          <rect className="revisionPaper" width="1600" height="1000" />
+          {Array.from({ length: 17 }).map((_, index) => <line key={`v-${index}`} className="revisionGrid" x1={index * 100} y1="0" x2={index * 100} y2="1000" />)}
+          {Array.from({ length: 11 }).map((_, index) => <line key={`h-${index}`} className="revisionGrid" x1="0" y1={index * 100} x2="1600" y2={index * 100} />)}
 
-          {sections.map((section) => (
-            <path
-              key={`path-${section.id}`}
-              d={`M 800 500 C ${(800 + section.slot.cx) / 2} 500, ${(800 + section.slot.cx) / 2} ${section.slot.cy}, ${section.slot.cx} ${section.slot.cy}`}
-              fill="none"
-              stroke={section.slot.color}
-              strokeWidth="8"
-              strokeLinecap="round"
-              opacity="0.92"
-            />
-          ))}
+          <g aria-hidden="true">
+            <path className="revisionDoodle" d="M 92 236 C 124 218, 152 222, 174 246 M 116 264 C 136 278, 166 276, 190 258" />
+            <path className="revisionDoodle" d="M 1420 760 C 1460 732, 1492 748, 1504 780 M 1418 794 L 1504 796" />
+            <path className="revisionDoodle" d="M 760 118 L 780 88 L 798 118 L 768 106 L 792 106 Z" />
+            <circle className="revisionDoodleDot" cx="1380" cy="246" r="5" />
+            <circle className="revisionDoodleDot" cx="214" cy="794" r="4" />
+            <circle className="revisionDoodleDot" cx="1310" cy="656" r="3.5" />
+          </g>
 
-          {sections.map(renderSection)}
-
-          <circle cx="800" cy="500" r="142" fill="#071d3d" stroke="#dbeafe" strokeWidth="8" filter="url(#mindmapShadow)" />
-          {wrapSvgText(root.id.toUpperCase(), 14).slice(0, 4).map((line, index, lines) => (
-            <text key={line} x="800" y={454 + (index - (lines.length - 1) / 2) * 38} textAnchor="middle" className="mindmapCenterTitle">
-              {line}
-            </text>
-          ))}
-          <rect x="675" y="594" width="250" height="42" rx="20" fill="#fde047" />
-          <text x="800" y="622" textAnchor="middle" className="mindmapCenterSub">ONE GLANCE REVISION</text>
+          {plannedSections.map(renderSection)}
 
           <g>
-            <rect x="315" y="835" width="970" height="62" rx="31" fill="#071d3d" />
-            <text x="800" y="875" textAnchor="middle" className="mindmapFlow">
-              {sections.slice(0, 5).map((section) => section.title.split(" ")[0]).join("  →  ")}
-            </text>
+            <path className="revisionCloud" d={SketchRenderer.cloudPath()} />
+            <path className="revisionInk" opacity=".28" d="M 982 526 C 1038 546, 1025 605, 952 612" />
+            {renderTextLines(centralLines, 800, centralLines.length > 1 ? 416 : 448, Math.round(centralFontSize * 0.92), "revisionTitle", "middle", { fontSize: centralFontSize })}
+            <path className="revisionUnderline" d="M 648 520 C 728 508, 872 526, 952 514" />
+            {centralBullets.slice(0, 3).map((item, index) => (
+              <g key={`center-${item}-${index}`}>
+                <circle cx="676" cy={558 + index * 28} r="4" fill="#17202e" />
+                {renderTextLines(wrapLines(item, 34, 1), 694, 565 + index * 28, 18, "revisionSubtitle")}
+              </g>
+            ))}
           </g>
-          <g>
-            <rect x="325" y="846" width="950" height="36" rx="18" fill="#071d3d" />
-            <text x="800" y="873" textAnchor="middle" className="mindmapFlow">{flowSummary}</text>
-          </g>
-          <g>
-            <rect x="80" y="910" width="1440" height="56" rx="26" fill="#fffefb" stroke="#0f5cc5" strokeWidth="3" />
-            <text x="800" y="946" textAnchor="middle" className="mindmapTiny">
-              Key idea: connect the big picture first, then revise each colored section.
-            </text>
-          </g>
+
+          {supportItems.length > 0 && (
+            <g>
+              <text x="800" y="844" textAnchor="middle" className="revisionCue">QUICK RECALL</text>
+              <path className="revisionInk" d="M 500 860 C 640 845, 960 845, 1100 860" />
+              {supportItems.map((item, index) => {
+                const x = 372 + index * 286;
+                return (
+                  <g key={`${item.label}-${index}`}>
+                    <path className="revisionMiniCard" d={SketchRenderer.cardPath(x, 882, 248, 70, item.label, "tag")} />
+                    {renderTextLines(wrapLines(item.label, 20, 1), x + 124, 908, 18, "revisionSmall", "middle")}
+                    {item.detail && renderTextLines(wrapLines(item.detail, 25, 1), x + 124, 934, 17, "revisionTiny", "middle")}
+                  </g>
+                );
+              })}
+            </g>
+          )}
+
+          {sheet.takeaways.length > 0 && (
+            <g>
+              <path className="revisionBottomRule" d="M 200 956 C 480 974, 1120 974, 1400 956" />
+              {renderTextLines(wrapLines(sheet.takeaways[0], 86, 1), 800, 985, 18, "revisionSmall", "middle")}
+            </g>
+          )}
         </svg>
       </div>
     );
   };
-
   const renderArtifactBody = (artifact: WorkspaceArtifact, isExpanded = false) => {
     if (artifact === "cheatsheet") {
       return cheatsheet.length > 0 ? (
@@ -1410,19 +1747,27 @@ const NoteApp = () => {
 
     return videoSrc ? (
       <div className={styles.sourceVideoPanel}>
-        <ReactPlayer
-          ref={playerRef}
-          src={videoSrc}
-          width="100%"
-          height={isExpanded ? "62vh" : "220px"}
-          controls={true}
-          playing={isPlaying}
-          onPlay={() => setIsPlaying(true)}
-          onPause={() => setIsPlaying(false)}
-          onError={() => {
-            // ReactPlayer can emit non-fatal provider errors for blocked embeds.
-          }}
-        />
+        {isSourcePinned && !isExpanded ? (
+          <div className={styles.sourcePinnedNotice}>
+            <Play size={18} />
+            <span>Source video is pinned while you revise.</span>
+            <button onClick={() => setIsSourcePinned(false)}>Show here</button>
+          </div>
+        ) : (
+          <ReactPlayer
+            ref={playerRef}
+            src={videoSrc}
+            width="100%"
+            height={isExpanded ? "62vh" : "220px"}
+            controls={true}
+            playing={isPlaying}
+            onPlay={() => setIsPlaying(true)}
+            onPause={() => setIsPlaying(false)}
+            onError={() => {
+              // ReactPlayer can emit non-fatal provider errors for blocked embeds.
+            }}
+          />
+        )}
       </div>
     ) : (
       <div className={styles.emptyArtifactState}>
@@ -1496,22 +1841,22 @@ const NoteApp = () => {
             <span>Workspace console</span>
             <h3>{activeArtifact ? artifactTitle[activeArtifact] : "Artifacts"}</h3>
           </div>
-          <button className={styles.consoleIconBtn} onClick={() => setIsArtifactConsoleOpen(false)}>
-            <Minimize2 size={18} />
+          <button className={styles.consoleActionBtn} onClick={() => setIsArtifactConsoleOpen(false)} aria-label="Hide workspace console">
+            <PanelRightClose size={16} />
+            <span>Hide</span>
           </button>
         </div>
 
         {activeArtifact ? (
           <div className={styles.artifactViewer}>
             <div className={styles.artifactViewerControls}>
-              <button className={styles.consoleIconBtn} onClick={() => setActiveArtifact(null)} aria-label="Back to artifact console">
+              <button className={`${styles.consoleActionBtn} ${styles.consoleActionBtnPrimary}`} onClick={() => setActiveArtifact(null)} aria-label="Back to artifact console">
                 <ChevronLeft size={18} />
+                <span>Back</span>
               </button>
-              <button className={styles.consoleIconBtn} onClick={() => setIsArtifactConsoleOpen(false)} aria-label="Minimize panel">
-                <Minimize2 size={18} />
-              </button>
-              <button className={styles.consoleIconBtn} onClick={() => setFullscreenArtifact(activeArtifact)} aria-label="Enlarge artifact">
-                <Maximize2 size={18} />
+              <button className={`${styles.consoleActionBtn} ${styles.consoleActionBtnAccent}`} onClick={() => setFullscreenArtifact(activeArtifact)} aria-label="Open artifact in full view">
+                <Maximize2 size={16} />
+                <span>Full view</span>
               </button>
             </div>
             {renderArtifactBody(activeArtifact)}
@@ -1770,13 +2115,9 @@ const NoteApp = () => {
                                 } else {
                                   seconds = parts[0] * 60 + parts[1];
                                 }
+                                setIsSourcePinned(true);
                                 setIsPlaying(true);
-                                const player = playerRef.current;
-                                if (player) {
-                                  setTimeout(() => {
-                                    player.currentTime = seconds;
-                                  }, 100);
-                                }
+                                setPendingSeekSeconds(seconds);
                               }}
                             >
                               <Clock size={12} style={{ display: 'inline', marginRight: '4px' }} /> 
@@ -1829,6 +2170,35 @@ const NoteApp = () => {
           )}
         </div>
       </main>
+
+      {markdown && videoSrc && isSourcePinned && !fullscreenArtifact && (
+        <div className={`${styles.floatingPlayer} no-print`}>
+          <button
+            className={styles.floatingPlayerClose}
+            onClick={() => {
+              setIsSourcePinned(false);
+              setIsPlaying(false);
+              setPendingSeekSeconds(null);
+            }}
+            aria-label="Close source video"
+          >
+            <X size={16} />
+          </button>
+          <ReactPlayer
+            ref={playerRef}
+            src={videoSrc}
+            width="100%"
+            height="100%"
+            controls={true}
+            playing={isPlaying}
+            onPlay={() => setIsPlaying(true)}
+            onPause={() => setIsPlaying(false)}
+            onError={() => {
+              // ReactPlayer can emit non-fatal provider errors for blocked embeds.
+            }}
+          />
+        </div>
+      )}
 
       {/* --- BEAUTIFUL AUDIO PLAYER --- */}
       {activeAudioUrl && (
@@ -1945,16 +2315,21 @@ const NoteApp = () => {
               <div className={styles.flashcardInner}>
                 <div className={styles.flashcardFront} style={isFlashcardMaximized ? { display: 'flex', flexDirection: 'column', justifyContent: 'center' } : {}}>
                   <div className={styles.flashcardLabel}>Question</div>
-                  <div className={styles.flashcardText} style={isFlashcardMaximized ? { fontSize: '2rem' } : {}}>{flashcards[flashcardIndex].question}</div>
+                  <div className={styles.flashcardText} style={isFlashcardMaximized ? { fontSize: '2rem' } : {}}>
+                    <FlashcardRichText text={flashcards[flashcardIndex].question} />
+                  </div>
                   <div className={styles.flipHint}><RotateCcw size={14} /> Click to flip</div>
                 </div>
                 <div className={styles.flashcardBack} style={isFlashcardMaximized ? { display: 'flex', flexDirection: 'column', justifyContent: 'center' } : {}}>
                   <div className={styles.flashcardLabel}>Answer</div>
-                  <div className={styles.flashcardText} style={isFlashcardMaximized ? { fontSize: '1.5rem' } : {}}>{flashcards[flashcardIndex].answer}</div>
+                  <div className={styles.flashcardText} style={isFlashcardMaximized ? { fontSize: '1.5rem' } : {}}>
+                    <FlashcardRichText text={flashcards[flashcardIndex].answer} />
+                  </div>
                   
                   {isFlipped && flashcards[flashcardIndex].explanation && (
                     <div style={{ marginTop: '1.5rem', padding: '1rem', background: 'rgba(255,255,255,0.88)', borderRadius: '8px', fontSize: isFlashcardMaximized ? '1.1rem' : '0.95rem', color: '#000000', transition: 'opacity 0.3s', opacity: showFlashcardExplanation ? 1 : 0, pointerEvents: showFlashcardExplanation ? 'auto' : 'none' }}>
-                      <strong>Explanation:</strong> {flashcards[flashcardIndex].explanation}
+                      <strong>Explanation:</strong>
+                      <FlashcardRichText text={flashcards[flashcardIndex].explanation || ""} />
                     </div>
                   )}
 
@@ -2039,8 +2414,9 @@ const NoteApp = () => {
                 <span>Expanded artifact</span>
                 <h2>{artifactTitle[fullscreenArtifact]}</h2>
               </div>
-              <button className={styles.consoleIconBtn} onClick={() => setFullscreenArtifact(null)}>
-                <Minimize2 size={20} />
+              <button className={styles.consoleActionBtn} onClick={() => setFullscreenArtifact(null)} aria-label="Close full view">
+                <X size={16} />
+                <span>Close</span>
               </button>
             </div>
             <div className={styles.fullscreenArtifactBody}>

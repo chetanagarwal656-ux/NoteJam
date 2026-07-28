@@ -957,10 +957,28 @@
   border-radius: 12px;
   overflow: hidden;
   box-shadow: 0 20px 40px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.1);
-  z-index: 50;
+  z-index: 70;
   animation: slideUpFade 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
   background: #000;
   transition: transform 0.3s ease;
+}
+
+.floatingPlayerClose {
+  position: absolute;
+  top: 0.45rem;
+  right: 0.45rem;
+  z-index: 2;
+  width: 1.85rem;
+  height: 1.85rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(0, 0, 0, 0.72);
+  color: #ffffff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
 }
 
 .floatingPlayer:hover {
@@ -990,6 +1008,30 @@
   border-color: rgba(255, 255, 255, 0.3);
   transform: translateY(-1px);
   box-shadow: 0 0 10px rgba(255, 255, 255, 0.12);
+}
+
+.flashcardRichText,
+.flashcardRichText p {
+  margin: 0;
+  color: inherit;
+  font: inherit;
+}
+
+.flashcardRichText {
+  display: inline;
+}
+
+.flashcardRichText p {
+  display: inline;
+}
+
+.flashcardRichText .katex {
+  color: inherit;
+  font-size: 1em;
+}
+
+.flashcardExplanation .flashcardRichText {
+  display: inline;
 }
 
 /* --- FLASHCARDS OVERLAY --- */
@@ -2349,6 +2391,70 @@
   color: #451a03 !important;
 }
 
+.markdown .timestampBtn,
+.markdown.handwritten .timestampBtn,
+.markdownLight .timestampBtn,
+.markdownLight.handwritten .timestampBtn,
+.markdown:not(.markdownLight).handwritten .timestampBtn {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 0.25rem !important;
+  padding: 0.12rem 0.48rem !important;
+  margin: 0 0.18rem !important;
+  border-radius: 0.38rem !important;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace !important;
+  font-size: 0.76em !important;
+  font-weight: 800 !important;
+  line-height: 1.2 !important;
+  text-shadow: none !important;
+  white-space: nowrap !important;
+  vertical-align: baseline !important;
+}
+
+.markdown .timestampBtn,
+.markdown .timestampBtn span,
+.markdown .timestampBtn svg {
+  color: #e8fbff !important;
+  stroke: currentColor !important;
+}
+
+.markdown .timestampBtn {
+  background: rgba(11, 26, 32, 0.86) !important;
+  border: 1px solid rgba(168, 235, 226, 0.44) !important;
+  box-shadow: 0 0 0 1px rgba(5, 12, 16, 0.28), 0 6px 16px rgba(0, 0, 0, 0.22) !important;
+}
+
+.markdownLight .timestampBtn,
+.markdownLight .timestampBtn span,
+.markdownLight .timestampBtn svg,
+.markdownLight.handwritten .timestampBtn,
+.markdownLight.handwritten .timestampBtn span,
+.markdownLight.handwritten .timestampBtn svg,
+.markdown:not(.markdownLight).handwritten .timestampBtn,
+.markdown:not(.markdownLight).handwritten .timestampBtn span,
+.markdown:not(.markdownLight).handwritten .timestampBtn svg {
+  color: #0f172a !important;
+  stroke: currentColor !important;
+}
+
+.markdownLight .timestampBtn,
+.markdownLight.handwritten .timestampBtn,
+.markdown:not(.markdownLight).handwritten .timestampBtn {
+  background: rgba(219, 234, 254, 0.96) !important;
+  border: 1px solid rgba(37, 99, 235, 0.48) !important;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.75), 0 4px 12px rgba(37, 99, 235, 0.16) !important;
+}
+
+@media print {
+  .markdown .timestampBtn,
+  .markdown.handwritten .timestampBtn,
+  .markdownLight .timestampBtn,
+  .markdownLight.handwritten .timestampBtn,
+  .markdown:not(.markdownLight).handwritten .timestampBtn {
+    display: none !important;
+  }
+}
+
 .mermaidDiagram {
   padding: 2rem;
   border-radius: 16px;
@@ -2581,6 +2687,51 @@
   border-color: rgba(218, 244, 251, 0.24);
 }
 
+.consoleActionBtn {
+  min-height: 2.35rem;
+  border-radius: 999px;
+  border: 1px solid rgba(218, 244, 251, 0.14);
+  background: rgba(222, 247, 253, 0.055);
+  color: #dff7f4;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.42rem;
+  padding: 0 0.82rem;
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 850;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: transform 0.18s ease, background 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+}
+
+.consoleActionBtn:hover {
+  transform: translateY(-1px);
+  background: rgba(222, 247, 253, 0.11);
+  border-color: rgba(218, 244, 251, 0.28);
+  color: #ffffff;
+}
+
+.consoleActionBtnPrimary {
+  background: rgba(69, 246, 224, 0.1);
+  border-color: rgba(69, 246, 224, 0.28);
+  color: #ebfffc;
+}
+
+.consoleActionBtnAccent {
+  background: linear-gradient(180deg, #eefaff, #b8cbd2);
+  border-color: rgba(255, 255, 255, 0.42);
+  color: #071116;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22);
+}
+
+.consoleActionBtnAccent:hover {
+  color: #020608;
+  background: linear-gradient(180deg, #ffffff, #c7d8de);
+}
+
 .artifactGrid {
   display: grid;
   gap: 0.75rem;
@@ -2742,8 +2893,9 @@
 
 .artifactViewerControls {
   display: flex;
-  justify-content: flex-end;
-  gap: 0.45rem;
+  justify-content: flex-start;
+  gap: 0.5rem;
+  flex-wrap: wrap;
 }
 
 .artifactViewer > :last-child {
@@ -2795,6 +2947,30 @@
   background: #020608;
 }
 
+.sourcePinnedNotice {
+  min-height: 220px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  color: #dff7f4;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(69, 246, 224, 0.16), transparent 17rem),
+    rgba(3, 10, 13, 0.76);
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.sourcePinnedNotice button {
+  border: 1px solid rgba(223, 247, 244, 0.32);
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+  border-radius: 999px;
+  padding: 0.4rem 0.75rem;
+  font: inherit;
+  cursor: pointer;
+}
+
 .mindmapInfographicShell {
   display: flex;
   flex-direction: column;
@@ -2813,6 +2989,8 @@
 
 .mindmapExportBar > div {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 0.45rem;
 }
 
@@ -2841,7 +3019,7 @@
 }
 
 .mindmapInfographicExpanded .mindmapInfographic {
-  max-height: min(72vh, 720px);
+  max-height: min(78vh, 860px);
 }
 
 .radialMindmap {

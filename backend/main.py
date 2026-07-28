@@ -83,6 +83,7 @@ client = genai.Client(http_options={'timeout': 3600000})
 def get_public_base_url() -> str:
     return os.getenv("PUBLIC_BASE_URL", "http://localhost:8000").rstrip("/")
 
+
 def parse_json_response(raw_text: str):
     cleaned = raw_text.strip()
     if cleaned.startswith("```json"):
@@ -555,28 +556,62 @@ def create_cheatsheet(req: DocumentRequest):
 @app.post("/mindmap")
 def create_mindmap(req: DocumentRequest):
     prompt = f"""
-    Based on the following lecture notes, generate a clear study mind map structure for a polished one-page revision infographic.
-    Identify one central concept, 5-7 main branches, and the most useful sub-topics under each branch.
-    Return ONLY a strictly valid JSON object with the following structure:
+    You are the content architect for NoteJam's deterministic vector mind-map renderer.
+    Your job is to turn lecture notes into a concise, visual revision-sheet data model.
+    Do NOT describe layout coordinates. Do NOT create SVG. Extract only the educational content and its priority.
+
+    Return ONLY a strictly valid JSON object using this exact schema:
     {{
-        "nodes": [
-            {{"id": "Central Topic", "group": 1}},
-            {{"id": "Subtopic A", "group": 2}}
-        ],
-        "links": [
-            {{"source": "Central Topic", "target": "Subtopic A"}}
-        ]
+      "version": "revision-sheet-v1",
+      "title": "2-6 word revision title",
+      "centralConcept": "2-5 word central concept",
+      "thesis": "one short sentence explaining the big idea",
+      "sections": [
+        {{
+          "title": "short section heading",
+          "cue": "tiny question label, e.g. What is it?",
+          "kind": "definition|formula|process|example|application|warning|result",
+          "importance": 1,
+          "icon": "speech|bulb|arrow|gear|box|pencil|target|chart|formula|book|atom|code|dice",
+          "bullets": ["2-4 concise facts from the notes"],
+          "formulas": ["optional short formula"],
+          "examples": ["optional short example"]
+        }}
+      ],
+      "examples": [
+        {{"label": "example name", "detail": "one short detail"}}
+      ],
+      "formulas": [
+        {{"label": "formula/rule name", "detail": "short formula or condition"}}
+      ],
+      "takeaways": ["2-4 short exam/revision takeaways"],
+      "flow": ["3-6 short step labels"]
     }}
-    Ensure all sources and targets in links exactly match the id of a node.
-    Keep node labels concise, readable, and student-friendly.
-    Do not include any text or markdown outside the JSON object.
-    
+
+    Quality rules:
+    - Generate 5 to 6 sections only. Fewer high-quality sections are better than crowded maps.
+    - Every section must contain real lecture content. Never write placeholders like Key idea or Main relationship.
+    - Keep centralConcept under 28 characters and 2 to 4 words. Do not use ellipses.
+    - Keep section titles under 26 characters.
+    - Keep each bullet under 48 characters.
+    - Use 2 or 3 bullets per section. Do not return paragraphs.
+    - Put formulas in formulas arrays, not buried in long paragraphs.
+    - Keep formula strings under 34 characters.
+    - Include examples only when they were actually taught in the notes.
+    - Make the content sparse enough for one readable page.
+    - If the lecture is mathematical, prefer definitions, conditions, formulas, examples, and derived results.
+    - Choose section kinds intentionally; do not mark every section as definition.
+    - Put examples, applications, and derived results into examples/formulas/takeaways when possible so the renderer can place them as support cards.
+    - Avoid title fragments ending with "for", "with", or "using".
+
     Notes:
     {req.markdown}
     """
     try:
         raw_text = robust_gemini_call(contents=[prompt], is_json=True)
-        return {"mindmap": parse_json_response(raw_text)}
+        data = parse_json_response(raw_text)
+        data["version"] = "revision-sheet-v1"
+        return {"mindmap": data}
     except Exception as e:
         print(f"Error generating mindmap: {e}")
         raise HTTPException(status_code=500, detail=str(e))
