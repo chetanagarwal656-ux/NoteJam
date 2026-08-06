@@ -9,6 +9,7 @@ import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import "katex/dist/katex.min.css";
 import styles from "./page.module.css";
+import { MindmapEngineView, type RawMindmapData } from "./mindmap-engine";
 import { useAuth, useClerk, UserButton } from "@clerk/nextjs";
 
 type Flashcard = { question: string; answer: string; explanation?: string };
@@ -20,17 +21,20 @@ type RevisionMindmapSection = {
   title: string;
   cue?: string;
   kind?: string;
+  type?: string;
   importance?: number;
   icon?: string;
   bullets?: string[];
   formulas?: string[];
   examples?: string[];
+  subNodes?: {label: string, detail?: string}[];
 };
 type RevisionMindmapFact = { label: string; detail?: string };
 type MindmapData = {
   version?: string;
   title?: string;
   centralConcept?: string;
+  centralList?: string[];
   thesis?: string;
   sections?: RevisionMindmapSection[];
   formulas?: RevisionMindmapFact[];
@@ -89,10 +93,6 @@ type WorkspaceSnapshot = {
 
 const WORKSPACE_STORAGE_KEY = "notejam-dashboard-workspace";
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-
-const getMindmapNodeId = (node: string | MindmapNode) => (
-  typeof node === "string" ? node : node.id
-);
 
 // Mermaid Component
 const Mermaid = ({ chart, noteTheme, isHandwritten }: { chart: string; noteTheme: "dark" | "light"; isHandwritten: boolean }) => {
@@ -1165,7 +1165,7 @@ const NoteApp = () => {
       return (
         <div className={styles.emptyArtifactState}>
           <Sparkles size={32} />
-          <p>Turn the note into a polished one-page study mind map.</p>
+          <p>Turn this note into a polished one-page study mind map.</p>
           <button className={styles.artifactPrimaryBtn} onClick={handleGenerateMindmap} disabled={isGeneratingMindmap}>
             {isGeneratingMindmap ? <Loader2 className={styles.loader} size={16} /> : <Sparkles size={16} />}
             Generate mind map
@@ -1173,396 +1173,6 @@ const NoteApp = () => {
         </div>
       );
     }
-
-    type RevisionSheet = {
-      title: string;
-      centralConcept: string;
-      thesis: string;
-      sections: RevisionMindmapSection[];
-      examples: RevisionMindmapFact[];
-      formulas: RevisionMindmapFact[];
-      takeaways: string[];
-      flow: string[];
-    };
-    type PlannedSection = {
-      id: string;
-      title: string;
-      cue: string;
-      kind: string;
-      icon: string;
-      importance: number;
-      bullets: string[];
-      formulas: string[];
-      examples: string[];
-      x: number;
-      y: number;
-      w: number;
-      h: number;
-      rotate: number;
-      shape: "note" | "bubble" | "tag" | "formula" | "ticket" | "torn";
-      connector: { sx: number; sy: number; cx: number; cy: number; ex: number; ey: number };
-      titleLines: string[];
-      bulletLines: string[][];
-      formulaLines: string[][];
-      exampleLines: string[][];
-    };
-
-    const SVG_WIDTH = 1600;
-    const PAPER_MARGIN = 64;
-    const center = { x: 800, y: 458, w: 390, h: 238 };
-    const placeholderPattern = /^(key idea|main relationship|exam revision point|review this core point|important concept|core concept|important point)$/i;
-    const stopWords = new Set(["a", "an", "and", "are", "as", "by", "for", "from", "how", "in", "into", "is", "of", "on", "or", "the", "to", "with", "using", "solving"]);
-
-    const clampText = (text: string, maxLength: number) => {
-      const clean = String(text || "").trim();
-      return clean.length > maxLength ? `${clean.slice(0, Math.max(0, maxLength - 1)).trim()}...` : clean;
-    };
-    const cleanText = (value: unknown, fallback = "") => (
-      String(value || fallback)
-        .replace(/[`*_#]/g, "")
-        .replace(/\$+/g, "")
-        .replace(/\\([A-Za-z]+)/g, "$1")
-        .replace(/\s+/g, " ")
-        .trim()
-    );
-    const hashText = (value: string) => [...value].reduce((hash, char) => ((hash * 31 + char.charCodeAt(0)) % 9973), 17);
-    const jitter = (seed: string, amount: number, step = 0) => (((hashText(`${seed}-${step}`) % 200) / 100) - 1) * amount;
-    const removeLongParenthetical = (text: string) => text.replace(/\s*\([^)]{20,}\)\s*/g, " ").replace(/\s+/g, " ").trim();
-    const smartTitle = (text: string, max = 30) => {
-      const cleaned = removeLongParenthetical(cleanText(text))
-        .replace(/\s+and\s+/gi, " & ")
-        .replace(/\s*[:;-]\s*$/g, "")
-        .trim();
-      return clampText(cleaned, max);
-    };
-    const centralTitle = (text: string) => {
-      const cleaned = removeLongParenthetical(cleanText(text, "Study Map"))
-        .replace(/\s+for\s+.+$/i, "")
-        .replace(/\s+using\s+.+$/i, "")
-        .replace(/\s+with\s+.+$/i, "")
-        .replace(/\s*[:;-].+$/g, "")
-        .trim();
-      if (cleaned.length <= 26 && cleaned.split(" ").length <= 4) return cleaned;
-      const words = cleaned.split(" ").filter(Boolean);
-      const meaningful = words.filter((word) => !stopWords.has(word.toLowerCase()));
-      const chosen = (meaningful.length >= 2 ? meaningful : words).slice(0, 3).join(" ").replace(/\.\.\.$/, "");
-      return chosen || "Study Map";
-    };
-    const wrapLines = (text: string, maxChars: number, maxLines = 3) => {
-      const words = cleanText(text).split(" ").filter(Boolean);
-      const lines: string[] = [];
-      let current = "";
-      words.forEach((word) => {
-        const safeWord = word.length > maxChars ? `${word.slice(0, maxChars - 1)}-` : word;
-        const candidate = current ? `${current} ${safeWord}` : safeWord;
-        if (candidate.length > maxChars && current) {
-          lines.push(current);
-          current = safeWord;
-        } else {
-          current = candidate;
-        }
-      });
-      if (current) lines.push(current);
-      if (lines.length > maxLines) {
-        const kept = lines.slice(0, maxLines);
-        kept[maxLines - 1] = clampText(kept[maxLines - 1], Math.max(8, maxChars - 2));
-        return kept;
-      }
-      return lines.length > 0 ? lines : [""];
-    };
-    const cleanList = (items: unknown[] | undefined, maxItems: number, maxLength: number) => (
-      (items || [])
-        .map((item) => clampText(cleanText(item), maxLength))
-        .filter((item) => item && !placeholderPattern.test(item))
-        .slice(0, maxItems)
-    );
-
-    const ContentExtractor = (): RevisionSheet => {
-      if (mindmap.sections && mindmap.sections.length > 0) {
-        return {
-          title: smartTitle(mindmap.title || mindmap.centralConcept || "Study Map", 44),
-          centralConcept: centralTitle(mindmap.centralConcept || mindmap.title || "Study Map"),
-          thesis: clampText(cleanText(mindmap.thesis || "Connect the core idea before revising details."), 84),
-          sections: mindmap.sections,
-          examples: (mindmap.examples || []).map((item) => ({ label: cleanText(item.label), detail: cleanText(item.detail) })),
-          formulas: mindmap.formulas || mindmap.results || [],
-          takeaways: mindmap.takeaways || (mindmap.footer ? [mindmap.footer] : []),
-          flow: mindmap.flow || [],
-        };
-      }
-
-      if (mindmap.branches && mindmap.branches.length > 0) {
-        return {
-          title: smartTitle(mindmap.title || "Study Map", 44),
-          centralConcept: centralTitle(mindmap.title || "Study Map"),
-          thesis: clampText(cleanText((mindmap.centerSummary || []).join("; ") || mindmap.footer || "One-page revision of the core lecture ideas."), 84),
-          sections: mindmap.branches.map((branch, index) => ({
-            title: branch.title,
-            cue: branch.prompt || ["What is it?", "Why matter?", "How used?"][index % 3],
-            kind: "definition",
-            importance: 8 - index,
-            icon: branch.icon,
-            bullets: branch.bullets,
-          })),
-          examples: (mindmap.examples || []).map((item) => ({ label: cleanText(item.label), detail: cleanText(item.detail) })),
-          formulas: mindmap.results || [],
-          takeaways: mindmap.footer ? [mindmap.footer] : [],
-          flow: mindmap.flow || [],
-        };
-      }
-
-      const allNodes = mindmap.nodes || [];
-      const allIds = new Set(allNodes.map((node) => node.id));
-      const validLinks = (mindmap.links || []).filter((link) => (
-        allIds.has(getMindmapNodeId(link.source)) && allIds.has(getMindmapNodeId(link.target))
-      ));
-      const degree = new Map<string, number>();
-      allNodes.forEach((node) => degree.set(node.id, 0));
-      validLinks.forEach((link) => {
-        const source = getMindmapNodeId(link.source);
-        const target = getMindmapNodeId(link.target);
-        degree.set(source, (degree.get(source) || 0) + 1);
-        degree.set(target, (degree.get(target) || 0) + 1);
-      });
-      const root = [...allNodes].sort((a, b) => (degree.get(b.id) || 0) - (degree.get(a.id) || 0))[0] || { id: "Study Map" };
-      const adjacency = new Map<string, string[]>();
-      allNodes.forEach((node) => adjacency.set(node.id, []));
-      validLinks.forEach((link) => {
-        const source = getMindmapNodeId(link.source);
-        const target = getMindmapNodeId(link.target);
-        adjacency.get(source)?.push(target);
-        adjacency.get(target)?.push(source);
-      });
-      const sections = (adjacency.get(root.id) || []).slice(0, 6).map((id, index) => ({
-        title: id,
-        cue: ["What is it?", "Why matter?", "How used?"][index % 3],
-        kind: "definition",
-        importance: 7 - index,
-        icon: ["speech", "bulb", "gear", "formula", "target", "chart"][index % 6],
-        bullets: (adjacency.get(id) || []).filter((item) => item !== root.id).slice(0, 3),
-      }));
-      return {
-        title: smartTitle(root.id, 44),
-        centralConcept: centralTitle(root.id),
-        thesis: "A quick visual path through the most connected concepts.",
-        sections,
-        examples: [],
-        formulas: [],
-        takeaways: [],
-        flow: sections.map((section) => smartTitle(section.title, 12)),
-      };
-    };
-
-    const IconSelector = (section: RevisionMindmapSection, index: number) => {
-      const text = `${section.title || ""} ${section.kind || ""} ${(section.bullets || []).join(" ")}`.toLowerCase();
-      if (section.icon) return section.icon;
-      if (/formula|equation|matrix|probability|law|rule|axiom/.test(text)) return "formula";
-      if (/example|case|sample|coin|dice|experiment/.test(text)) return "dice";
-      if (/process|step|algorithm|workflow|method/.test(text)) return "arrow";
-      if (/warning|fail|error|risk|condition/.test(text)) return "target";
-      if (/component|system|architecture|computer|code/.test(text)) return "code";
-      return ["speech", "bulb", "gear", "book", "target", "chart"][index % 6];
-    };
-
-    const InformationArchitect = (sheet: RevisionSheet) => {
-      const rawDensity = sheet.sections.reduce((score, section) => {
-        const titleScore = cleanText(section.title).length > 24 ? 1 : 0;
-        const bulletScore = (section.bullets || []).filter((bullet) => cleanText(bullet).length > 42).length;
-        const formulaScore = (section.formulas || []).length * 1.4;
-        return score + titleScore + bulletScore + formulaScore;
-      }, 0);
-      const visibleSectionCount = rawDensity > 7 ? 5 : 6;
-      const sections = [...sheet.sections]
-        .map((section, index) => {
-          const kind = section.kind || "definition";
-          const formulas = cleanList(section.formulas, kind === "formula" ? 2 : 1, 34);
-          const examples = cleanList(section.examples, 1, 40);
-          const bullets = cleanList(section.bullets, formulas.length > 0 ? 2 : 3, 48);
-          const importance = Math.max(1, Math.min(10, Number(section.importance || 6) + (formulas.length ? 1 : 0)));
-          return {
-            ...section,
-            title: smartTitle(section.title || `Topic ${index + 1}`, 28),
-            cue: smartTitle(section.cue || ["What is it?", "Why?", "How?", "When?", "Watch for?", "Example?"][index % 6], 24),
-            kind,
-            importance,
-            icon: IconSelector(section, index),
-            bullets: bullets.length > 0 ? bullets : examples.slice(0, 1),
-            formulas,
-            examples,
-          };
-        })
-        .filter((section) => section.title)
-        .sort((a, b) => (b.importance || 5) - (a.importance || 5))
-        .slice(0, visibleSectionCount);
-
-      return {
-        ...sheet,
-        centralConcept: centralTitle(sheet.centralConcept || sheet.title),
-        thesis: clampText(cleanText(sheet.thesis), 84),
-        sections,
-        examples: (sheet.examples || []).map((item) => ({ label: smartTitle(item.label, 22), detail: clampText(cleanText(item.detail), 34) })).filter((item) => item.label).slice(0, 3),
-        formulas: (sheet.formulas || []).map((item) => ({ label: smartTitle(item.label, 22), detail: clampText(cleanText(item.detail), 34) })).filter((item) => item.label).slice(0, 3),
-        takeaways: cleanList(sheet.takeaways, 2, 68),
-        flow: cleanList(sheet.flow, 5, 16),
-      };
-    };
-
-    const BoxSizer = (section: ReturnType<typeof InformationArchitect>["sections"][number], baseWidth: number) => {
-      const titleWeight = Math.max(0, section.title.length - 18);
-      const formulaWeight = (section.formulas || []).join(" ").length;
-      const width = Math.max(320, Math.min(455, baseWidth + Math.min(62, titleWeight * 4 + formulaWeight * 0.55)));
-      const titleChars = Math.max(15, Math.floor((width - 76) / 13.2));
-      const bodyChars = Math.max(23, Math.floor((width - 88) / 9.4));
-      const titleLines = wrapLines(section.title.toUpperCase(), titleChars, 2);
-      const bulletLines = (section.bullets || []).slice(0, section.formulas?.length ? 2 : 3).map((bullet) => wrapLines(bullet, bodyChars, 2));
-      const formulaLines = (section.formulas || []).slice(0, 2).map((formula) => wrapLines(formula, Math.floor((width - 118) / 8.8), 1));
-      const exampleLines = (section.examples || []).slice(0, 1).map((example) => wrapLines(example, Math.floor((width - 118) / 8.8), 1));
-      const bodyLineCount = bulletLines.reduce((sum, lines) => sum + lines.length, 0);
-      const chipLineCount = formulaLines.length + exampleLines.length;
-      const desiredHeight = 92 + titleLines.length * 25 + bodyLineCount * 24 + chipLineCount * 38;
-      const height = Math.max(150, Math.min(242, desiredHeight));
-      return { width, height, titleLines, bulletLines, formulaLines, exampleLines };
-    };
-
-    const LayoutPlanner = (sheet: ReturnType<typeof InformationArchitect>) => {
-      const slotCatalog = [
-        { x: 122, y: 120, w: 386, side: "left", shape: "torn" as const, rotate: -2.1 },
-        { x: 1092, y: 130, w: 390, side: "right", shape: "bubble" as const, rotate: 1.35 },
-        { x: 94, y: 438, w: 370, side: "left", shape: "formula" as const, rotate: 1.0 },
-        { x: 1138, y: 426, w: 370, side: "right", shape: "note" as const, rotate: -1.15 },
-        { x: 270, y: 690, w: 384, side: "left", shape: "ticket" as const, rotate: -0.85 },
-        { x: 942, y: 684, w: 384, side: "right", shape: "tag" as const, rotate: 1.15 },
-      ];
-      const usedSlots = sheet.sections.length === 5
-        ? [slotCatalog[0], slotCatalog[1], slotCatalog[2], slotCatalog[3], { ...slotCatalog[4], x: 606, y: 722, side: "center", w: 392, rotate: -0.3 }]
-        : slotCatalog;
-
-      return sheet.sections.map((section, index) => {
-        const slot = usedSlots[index];
-        const measured = BoxSizer(section, slot.w);
-        const side = slot.side as "left" | "right" | "center";
-        const x = Math.max(PAPER_MARGIN + 20, Math.min(SVG_WIDTH - PAPER_MARGIN - measured.width - 20, slot.x + jitter(section.title, side === "center" ? 8 : 14, 1)));
-        const y = Math.max(98, Math.min(760, slot.y + jitter(section.title, 10, 2)));
-        const sx = side === "left" ? center.x - center.w * 0.46 : side === "right" ? center.x + center.w * 0.46 : center.x;
-        const sy = index < 2 ? center.y - center.h * 0.38 : index < 4 ? center.y + 8 : center.y + center.h * 0.43;
-        const ex = side === "left" ? x + measured.width + 10 : side === "right" ? x - 10 : x + measured.width / 2;
-        const ey = side === "center" ? y - 8 : y + measured.height * 0.46;
-        const cxBias = side === "left" ? -70 : side === "right" ? 70 : 0;
-        return {
-          id: `${section.title}-${index}`,
-          title: section.title,
-          cue: section.cue || "Key idea",
-          kind: section.kind || "definition",
-          icon: section.icon || slot.shape,
-          importance: section.importance || 5,
-          bullets: section.bullets || [],
-          formulas: section.formulas || [],
-          examples: section.examples || [],
-          x,
-          y,
-          w: measured.width,
-          h: measured.height,
-          rotate: slot.rotate + jitter(section.title, 0.35, 3),
-          shape: section.kind === "formula" ? "formula" : slot.shape,
-          connector: { sx, sy, cx: (sx + ex) / 2 + cxBias + jitter(section.title, 22, 4), cy: (sy + ey) / 2 + jitter(section.title, 28, 5), ex, ey },
-          titleLines: measured.titleLines,
-          bulletLines: measured.bulletLines,
-          formulaLines: measured.formulaLines,
-          exampleLines: measured.exampleLines,
-        };
-      });
-    };
-    const sheet = InformationArchitect(ContentExtractor());
-    const plannedSections = LayoutPlanner(sheet);
-    const centralLines = wrapLines(sheet.centralConcept.toUpperCase(), sheet.centralConcept.length > 18 ? 14 : 18, 2);
-    const centralFontSize = centralLines.length > 1 ? (Math.max(...centralLines.map((line) => line.length)) > 14 ? 42 : 46) : 54;
-    const centralBullets = [sheet.thesis, ...sheet.flow.slice(0, 3)].filter(Boolean).map((item) => clampText(cleanText(item), 36)).slice(0, 4);
-    const supportItems = [...sheet.formulas.map((item) => ({ ...item, label: `Rule: ${item.label}` })), ...sheet.examples.map((item) => ({ ...item, label: `Ex: ${item.label}` }))].slice(0, 3);
-
-    const renderTextLines = (lines: string[] | string, x: number, y: number, lineHeight: number, className: string, anchor: "start" | "middle" | "end" = "start", style?: React.CSSProperties) => {
-      const safeLines = Array.isArray(lines) ? lines : wrapLines(lines, 32, 3);
-      return (
-        <text x={x} y={y} className={className} textAnchor={anchor} style={style}>
-          {safeLines.map((line, lineIndex) => (
-            <tspan key={`${line}-${lineIndex}`} x={x} dy={lineIndex === 0 ? 0 : lineHeight}>{line}</tspan>
-          ))}
-        </text>
-      );
-    };
-
-    const SketchRenderer = {
-      cardPath: (x: number, y: number, w: number, h: number, seed: string, shape: PlannedSection["shape"]) => {
-        if (shape === "torn") {
-          return `M ${x + 24} ${y + 8} C ${x + 118} ${y - 6 + jitter(seed, 5, 1)}, ${x + w - 118} ${y + 14}, ${x + w - 20} ${y + 4} L ${x + w - 8} ${y + h - 24} C ${x + w - 98} ${y + h + 6}, ${x + 112} ${y + h - 4}, ${x + 22} ${y + h + 2} L ${x + 6} ${y + 38} Q ${x + 12} ${y + 16}, ${x + 24} ${y + 8} Z`;
-        }
-        if (shape === "ticket") {
-          return `M ${x + 28} ${y + 4} H ${x + w - 28} Q ${x + w - 4} ${y + 4}, ${x + w - 4} ${y + 30} Q ${x + w - 30} ${y + 43}, ${x + w - 4} ${y + 56} V ${y + h - 28} Q ${x + w - 8} ${y + h + 4}, ${x + w - 38} ${y + h - 2} H ${x + 34} Q ${x + 8} ${y + h + 4}, ${x + 4} ${y + h - 28} V ${y + 56} Q ${x + 30} ${y + 43}, ${x + 4} ${y + 30} Q ${x + 4} ${y + 4}, ${x + 28} ${y + 4} Z`;
-        }
-        if (shape === "formula") {
-          return `M ${x + 18} ${y + 12} Q ${x + w * 0.5} ${y - 12}, ${x + w - 18} ${y + 16} L ${x + w - 8} ${y + h - 18} Q ${x + w * 0.5} ${y + h + 10}, ${x + 18} ${y + h - 8} L ${x + 8} ${y + 18} Z`;
-        }
-        if (shape === "bubble") {
-          return `M ${x + 28} ${y + 14} C ${x + w * 0.28} ${y - 12 + jitter(seed, 4, 1)}, ${x + w * 0.72} ${y + 2}, ${x + w - 28} ${y + 16} Q ${x + w + 16} ${y + h * 0.45}, ${x + w - 24} ${y + h - 12} C ${x + w * 0.7} ${y + h + 12}, ${x + w * 0.34} ${y + h + 2}, ${x + 28} ${y + h - 10} Q ${x - 14} ${y + h * 0.5}, ${x + 28} ${y + 14} Z`;
-        }
-        if (shape === "tag") {
-          return `M ${x + 18} ${y + 6} L ${x + w - 22} ${y + 12} Q ${x + w + 8} ${y + h * 0.5}, ${x + w - 18} ${y + h - 10} L ${x + 20} ${y + h - 4} Q ${x - 12} ${y + h * 0.52}, ${x + 18} ${y + 6} Z`;
-        }
-        return `M ${x + 18} ${y + 8} C ${x + w * 0.34} ${y - 8 + jitter(seed, 4, 1)}, ${x + w * 0.68} ${y + 4}, ${x + w - 14} ${y + 12} Q ${x + w + 10} ${y + h * 0.45}, ${x + w - 10} ${y + h - 16} C ${x + w * 0.66} ${y + h + 8}, ${x + w * 0.3} ${y + h - 2}, ${x + 16} ${y + h - 10} Q ${x - 10} ${y + h * 0.46}, ${x + 18} ${y + 8} Z`;
-      },
-      cloudPath: () => "M 604 362 C 574 294, 656 252, 718 286 C 758 215, 856 226, 890 284 C 962 252, 1044 308, 1008 382 C 1082 418, 1050 512, 976 520 C 992 592, 892 636, 830 582 C 780 644, 682 608, 692 536 C 612 552, 552 482, 580 420 C 558 394, 574 368, 604 362 Z",
-      connector: (section: PlannedSection) => `M ${section.connector.sx} ${section.connector.sy} C ${section.connector.cx} ${section.connector.cy}, ${section.connector.cx} ${section.connector.cy}, ${section.connector.ex} ${section.connector.ey}`,
-    };
-    const renderIcon = (icon: string, x: number, y: number, scale = 1) => {
-      const common = { fill: "none", stroke: "#17202e", strokeWidth: 4 * scale, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
-      const sx = (n: number) => x + n * scale;
-      const sy = (n: number) => y + n * scale;
-      if (icon === "bulb") return <g><path {...common} d={`M ${sx(17)} ${sy(31)} C ${sx(8)} ${sy(12)}, ${sx(25)} ${sy(0)}, ${sx(40)} ${sy(13)} C ${sx(51)} ${sy(25)}, ${sx(38)} ${sy(36)}, ${sx(38)} ${sy(43)} L ${sx(18)} ${sy(43)} C ${sx(18)} ${sy(37)}, ${sx(19)} ${sy(34)}, ${sx(17)} ${sy(31)}`} /><path {...common} d={`M ${sx(20)} ${sy(51)} L ${sx(36)} ${sy(51)} M ${sx(23)} ${sy(59)} L ${sx(33)} ${sy(59)}`} /></g>;
-      if (icon === "gear") return <g><circle {...common} cx={sx(28)} cy={sy(31)} r={15 * scale} /><path {...common} d={`M ${sx(28)} ${sy(7)} V ${sy(0)} M ${sx(28)} ${sy(62)} V ${sy(54)} M ${sx(5)} ${sy(31)} H ${sx(0)} M ${sx(57)} ${sy(31)} H ${sx(51)}`} /></g>;
-      if (icon === "formula") return <text x={sx(4)} y={sy(43)} className="revisionIconText">fx</text>;
-      if (icon === "target") return <g><circle {...common} cx={sx(29)} cy={sy(31)} r={24 * scale} /><circle {...common} cx={sx(29)} cy={sy(31)} r={11 * scale} /><path {...common} d={`M ${sx(29)} ${sy(31)} L ${sx(60)} ${sy(0)}`} /></g>;
-      if (icon === "chart") return <g><path {...common} d={`M ${sx(6)} ${sy(55)} H ${sx(56)} M ${sx(15)} ${sy(49)} V ${sy(35)} M ${sx(30)} ${sy(49)} V ${sy(19)} M ${sx(45)} ${sy(49)} V ${sy(10)}`} /></g>;
-      if (icon === "code") return <g><path {...common} d={`M ${sx(21)} ${sy(17)} L ${sx(8)} ${sy(31)} L ${sx(21)} ${sy(45)} M ${sx(39)} ${sy(17)} L ${sx(52)} ${sy(31)} L ${sx(39)} ${sy(45)}`} /></g>;
-      if (icon === "dice") return <g><rect {...common} x={sx(8)} y={sy(10)} width={42 * scale} height={42 * scale} rx={7 * scale} /><circle cx={sx(21)} cy={sy(23)} r={3 * scale} fill="#17202e" /><circle cx={sx(37)} cy={sy(23)} r={3 * scale} fill="#17202e" /><circle cx={sx(29)} cy={sy(39)} r={3 * scale} fill="#17202e" /></g>;
-      if (icon === "arrow") return <g><path {...common} d={`M ${sx(4)} ${sy(46)} C ${sx(22)} ${sy(8)}, ${sx(42)} ${sy(8)}, ${sx(56)} ${sy(18)} M ${sx(56)} ${sy(18)} L ${sx(45)} ${sy(20)} M ${sx(56)} ${sy(18)} L ${sx(50)} ${sy(30)}`} /></g>;
-      return <g><path {...common} d={`M ${sx(7)} ${sy(14)} Q ${sx(30)} ${sy(0)}, ${sx(55)} ${sy(14)} V ${sy(38)} Q ${sx(55)} ${sy(51)}, ${sx(37)} ${sy(51)} L ${sx(21)} ${sy(61)} L ${sx(24)} ${sy(51)} Q ${sx(7)} ${sy(51)}, ${sx(7)} ${sy(38)} Z`} /></g>;
-    };
-
-    const renderSection = (section: PlannedSection) => {
-      const titleBottom = section.y + 60 + (section.titleLines.length - 1) * 25;
-      const bodyStart = titleBottom + 34;
-      let cursorY = bodyStart;
-      return (
-        <g key={section.id}>
-          <path className="revisionConnector" d={SketchRenderer.connector(section)} />
-          <g transform={`rotate(${section.rotate} ${section.x + section.w / 2} ${section.y + section.h / 2})`}>
-            <path className="revisionNoteFill" d={SketchRenderer.cardPath(section.x, section.y, section.w, section.h, section.id, section.shape)} />
-            {renderIcon(section.icon, section.x + 16, section.y - 48, 0.72)}
-            <text x={section.x + 72} y={section.y - 18} className="revisionCue">{section.cue}</text>
-            {renderTextLines(section.titleLines, section.x + 30, section.y + 38, 25, "revisionSectionTitle")}
-            <path className="revisionUnderline" d={`M ${section.x + 30} ${titleBottom} C ${section.x + 132} ${titleBottom - 5}, ${section.x + 254} ${titleBottom + 4}, ${section.x + section.w - 30} ${titleBottom - 1}`} />
-            {section.bulletLines.map((lines, bulletIndex) => {
-              const y = cursorY;
-              cursorY += lines.length * 22 + 3;
-              return (
-                <g key={`${section.id}-bullet-${bulletIndex}`}>
-                  <circle cx={section.x + 42} cy={y - 6} r="4" fill="#17202e" />
-                  {renderTextLines(lines, section.x + 58, y, 21, "revisionBullet")}
-                </g>
-              );
-            })}
-            {[...section.formulaLines, ...section.exampleLines].slice(0, 2).map((lines, index) => {
-              const y = Math.min(section.y + section.h - 34, Math.max(cursorY + 12 + index * 34, section.y + section.h - 74 + index * 34));
-              return (
-                <g key={`${section.id}-chip-${index}`}>
-                  <path className="revisionMiniCard" d={SketchRenderer.cardPath(section.x + 38, y - 21, section.w - 76, 28, `${section.id}-chip-${index}`, "tag")} />
-                  {renderTextLines(lines, section.x + section.w / 2, y, 17, "revisionMiniText", "middle")}
-                </g>
-              );
-            })}
-          </g>
-        </g>
-      );
-    };
 
     return (
       <div className={`${styles.mindmapInfographicShell} ${isExpanded ? styles.mindmapInfographicExpanded : ""}`}>
@@ -1574,81 +1184,11 @@ const NoteApp = () => {
             <button onClick={exportMindmapAsSvg}><Download size={15} /> SVG</button>
           </div>
         </div>
-        <svg ref={mindmapSvgRef} className={styles.mindmapInfographic} viewBox="0 0 1600 1000" role="img" aria-label={`${sheet.title} mind map`}>
-          <style>{`
-            .revisionPaper{fill:#fffdf7}
-            .revisionGrid{stroke:#17202e;stroke-width:1;opacity:.04}
-            .revisionInk{fill:none;stroke:#17202e;stroke-width:4;stroke-linecap:round;stroke-linejoin:round}
-            .revisionCloud{fill:#fffdf7;stroke:#17202e;stroke-width:4;stroke-linecap:round;stroke-linejoin:round}
-            .revisionConnector{fill:none;stroke:#17202e;stroke-width:3.8;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:10 12;opacity:.68}
-            .revisionNoteFill{fill:rgba(255,255,255,.76);stroke:#17202e;stroke-width:4;stroke-linecap:round;stroke-linejoin:round}
-            .revisionTitle{font:900 48px "Comic Sans MS", "Trebuchet MS", Arial, sans-serif;fill:#17202e;letter-spacing:.8px}
-            .revisionSubtitle{font:700 20px "Trebuchet MS", Arial, sans-serif;fill:#334155}
-            .revisionCue{font:900 18px "Comic Sans MS", "Trebuchet MS", Arial, sans-serif;fill:#17202e}
-            .revisionSectionTitle{font:900 26px "Trebuchet MS", Arial, sans-serif;fill:#17202e;letter-spacing:.2px}
-            .revisionBullet{font:700 18px "Trebuchet MS", Arial, sans-serif;fill:#17202e}
-            .revisionMiniText{font:800 15px "Trebuchet MS", Arial, sans-serif;fill:#17202e}
-            .revisionSmall{font:800 17px "Trebuchet MS", Arial, sans-serif;fill:#17202e}
-            .revisionTiny{font:800 14px "Trebuchet MS", Arial, sans-serif;fill:#17202e}
-            .revisionIconText{font:900 34px "Comic Sans MS", "Trebuchet MS", Arial, sans-serif;fill:#17202e}
-            .revisionUnderline{fill:none;stroke:#17202e;stroke-width:3.5;stroke-linecap:round}
-            .revisionMiniCard{fill:#fffdf7;stroke:#17202e;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
-            .revisionBottomRule{fill:#fffdf7;stroke:#17202e;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}
-            .revisionDoodle{fill:none;stroke:#17202e;stroke-width:3;stroke-linecap:round;stroke-linejoin:round;opacity:.7}
-            .revisionDoodleDot{fill:#17202e;opacity:.55}
-          `}</style>
-          <rect className="revisionPaper" width="1600" height="1000" />
-          {Array.from({ length: 17 }).map((_, index) => <line key={`v-${index}`} className="revisionGrid" x1={index * 100} y1="0" x2={index * 100} y2="1000" />)}
-          {Array.from({ length: 11 }).map((_, index) => <line key={`h-${index}`} className="revisionGrid" x1="0" y1={index * 100} x2="1600" y2={index * 100} />)}
-
-          <g aria-hidden="true">
-            <path className="revisionDoodle" d="M 92 236 C 124 218, 152 222, 174 246 M 116 264 C 136 278, 166 276, 190 258" />
-            <path className="revisionDoodle" d="M 1420 760 C 1460 732, 1492 748, 1504 780 M 1418 794 L 1504 796" />
-            <path className="revisionDoodle" d="M 760 118 L 780 88 L 798 118 L 768 106 L 792 106 Z" />
-            <circle className="revisionDoodleDot" cx="1380" cy="246" r="5" />
-            <circle className="revisionDoodleDot" cx="214" cy="794" r="4" />
-            <circle className="revisionDoodleDot" cx="1310" cy="656" r="3.5" />
-          </g>
-
-          {plannedSections.map(renderSection)}
-
-          <g>
-            <path className="revisionCloud" d={SketchRenderer.cloudPath()} />
-            <path className="revisionInk" opacity=".28" d="M 982 526 C 1038 546, 1025 605, 952 612" />
-            {renderTextLines(centralLines, 800, centralLines.length > 1 ? 416 : 448, Math.round(centralFontSize * 0.92), "revisionTitle", "middle", { fontSize: centralFontSize })}
-            <path className="revisionUnderline" d="M 648 520 C 728 508, 872 526, 952 514" />
-            {centralBullets.slice(0, 3).map((item, index) => (
-              <g key={`center-${item}-${index}`}>
-                <circle cx="676" cy={558 + index * 28} r="4" fill="#17202e" />
-                {renderTextLines(wrapLines(item, 34, 1), 694, 565 + index * 28, 18, "revisionSubtitle")}
-              </g>
-            ))}
-          </g>
-
-          {supportItems.length > 0 && (
-            <g>
-              <text x="800" y="844" textAnchor="middle" className="revisionCue">QUICK RECALL</text>
-              <path className="revisionInk" d="M 500 860 C 640 845, 960 845, 1100 860" />
-              {supportItems.map((item, index) => {
-                const x = 372 + index * 286;
-                return (
-                  <g key={`${item.label}-${index}`}>
-                    <path className="revisionMiniCard" d={SketchRenderer.cardPath(x, 882, 248, 70, item.label, "tag")} />
-                    {renderTextLines(wrapLines(item.label, 20, 1), x + 124, 908, 18, "revisionSmall", "middle")}
-                    {item.detail && renderTextLines(wrapLines(item.detail, 25, 1), x + 124, 934, 17, "revisionTiny", "middle")}
-                  </g>
-                );
-              })}
-            </g>
-          )}
-
-          {sheet.takeaways.length > 0 && (
-            <g>
-              <path className="revisionBottomRule" d="M 200 956 C 480 974, 1120 974, 1400 956" />
-              {renderTextLines(wrapLines(sheet.takeaways[0], 86, 1), 800, 985, 18, "revisionSmall", "middle")}
-            </g>
-          )}
-        </svg>
+        <MindmapEngineView
+          mindmap={mindmap as RawMindmapData}
+          svgRef={mindmapSvgRef}
+          isExpanded={isExpanded}
+        />
       </div>
     );
   };

@@ -1,5 +1,12 @@
 import type { Metadata } from "next";
+import { Kalam } from "next/font/google";
 import "./globals.css";
+
+const kalam = Kalam({
+  subsets: ["latin"],
+  weight: ["300", "400", "700"],
+  variable: "--font-kalam",
+});
 
 export const metadata: Metadata = {
   title: "NoteJam - AI Study Workspaces",
@@ -15,7 +22,7 @@ export default function RootLayout({
 }>) {
   return (
     <ClerkProvider>
-      <html lang="en" suppressHydrationWarning>
+      <html lang="en" suppressHydrationWarning className={`${kalam.variable}`}>
         <body suppressHydrationWarning>{children}</body>
       </html>
     </ClerkProvider>
