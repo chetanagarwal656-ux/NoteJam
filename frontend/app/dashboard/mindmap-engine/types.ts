@@ -1,97 +1,182 @@
-export type SectionType = "post_it";
+export type StructureType = "hub" | "sequence" | "hierarchy" | "comparison" | "timeline";
 
-export type IconType = "bulb" | "gear" | "target" | "dice" | "book" | "code" | "chart" | "speech" | "atom";
+export type SectionKind =
+  | "definition"
+  | "formula"
+  | "process"
+  | "example"
+  | "application"
+  | "warning"
+  | "result";
 
-export interface StickyColorTheme {
-  bg: string;
-  border: string;
-  tape: string;
-}
+export type IconType =
+  | "bulb"
+  | "gear"
+  | "box"
+  | "target"
+  | "chart"
+  | "formula"
+  | "book"
+  | "atom"
+  | "code"
+  | "warning"
+  | "check"
+  | "dice"
+  | "speech";
 
-export interface SubNodeItem {
-  label: string;
-  detail?: string;
-}
+export type ImportanceTier = 1 | 2 | 3;
 
-export interface LegacyMindmapBranch {
+export interface RawMindmapSection {
   title?: string;
-  prompt?: string;
-  bullets?: string[];
-  icon?: string;
-}
-
-export interface LegacyMindmapNode {
-  id?: string;
-  label?: string;
-}
-
-export interface LegacyMindmapLink {
-  source: string | LegacyMindmapNode;
-  target: string | LegacyMindmapNode;
-}
-
-export interface MindmapSectionInput {
-  title: string;
   cue?: string;
   kind?: string;
-  type?: string;
   importance?: number;
-  icon?: IconType | string;
+  icon?: string;
   bullets?: string[];
-  formulas?: string[];
-  examples?: string[];
-  subNodes?: SubNodeItem[];
+  parentTitle?: string | null;
+  compareGroup?: "A" | "B" | string | null;
+  timeMarker?: string | null;
+  formulas?: (string | { label?: string; detail?: string })[];
+  examples?: (string | { label?: string; detail?: string })[];
+  [key: string]: unknown;
 }
 
 export interface RawMindmapData {
   version?: string;
   title?: string;
   centralConcept?: string;
-  centralTopic?: string;
-  centralList?: string[];
+  coreConcept?: string;
   thesis?: string;
-  sections?: MindmapSectionInput[];
-  formulas?: { label: string; detail?: string }[];
+  structureType?: string;
+  sections?: RawMindmapSection[];
+  flow?: string[];
+  formulas?: Array<{ label?: string; detail?: string; relatedSection?: string } | string>;
+  examples?: Array<{ label?: string; detail?: string; relatedSection?: string } | string>;
   takeaways?: string[];
-  centerSummary?: string[];
-  branches?: LegacyMindmapBranch[];
-  examples?: { label: string; detail?: string }[];
-  nodes?: LegacyMindmapNode[];
-  links?: LegacyMindmapLink[];
-  stickyNotes?: { title?: string; content?: string; color?: string }[];
+  compareGroupLabels?: { A?: string; B?: string };
+  // Legacy v1 and earlier fallbacks
+  stickyNotes?: Array<{ title?: string; body?: string; kind?: string }>;
+  branches?: Array<{ title?: string; items?: string[] }>;
+  nodes?: Array<{ label?: string; text?: string }>;
+  subtopics?: Array<{ title?: string; details?: string[] }>;
+  [key: string]: unknown;
+}
+
+export interface ExtractedSection {
+  id: string;
+  title: string;
+  cue: string;
+  kind: SectionKind;
+  importance: ImportanceTier;
+  icon: IconType;
+  bullets: string[];
+  parentTitle?: string | null;
+  compareGroup?: "A" | "B" | null;
+  timeMarker?: string | null;
+}
+
+export interface ExtractedFormula {
+  label: string;
+  detail: string;
+  relatedSection?: string;
+}
+
+export interface ExtractedExample {
+  label: string;
+  detail: string;
+  relatedSection?: string;
 }
 
 export interface ExtractedContent {
+  version: string;
   title: string;
   centralConcept: string;
-  centralList: string[];
-  sections: MindmapSectionInput[];
+  thesis: string;
+  structureType: StructureType;
+  sections: ExtractedSection[];
+  flow: string[];
+  formulas: ExtractedFormula[];
+  examples: ExtractedExample[];
+  takeaways: string[];
+  compareGroupLabels?: { A: string; B: string };
 }
 
-export interface ArchitectSection extends MindmapSectionInput {
-  id: string;
-  importanceScore: number;
-  resolvedType: SectionType;
-  resolvedIcon: IconType;
+export interface CardTheme {
+  name: string;
+  bg: string;
+  headerBg: string;
+  border: string;
+  accent: string;
+  accentLight: string;
+  text: string;
+  badgeBg: string;
+  badgeText: string;
+  gradientId?: string;
+}
+
+export interface CardDimensions {
+  width: number;
+  height: number;
   titleLines: string[];
-  bulletLinesList: string[][];
-  cardWidth: number;
-  cardHeight: number;
-  theme: StickyColorTheme;
+  wrappedBullets: string[][];
 }
 
-export interface PositionedCard {
+export interface PlannedNode {
   id: string;
-  section: ArchitectSection;
-  cx: number;
-  cy: number;
   x: number;
   y: number;
-  w: number;
-  h: number;
-  rotate: number;
-  edgeSX: number;
-  edgeSY: number;
-  targetX: number;
-  targetY: number;
+  width: number;
+  height: number;
+  section: ExtractedSection;
+  theme: CardTheme;
+  role:
+    | "primary"
+    | "secondary"
+    | "hub"
+    | "step"
+    | "column-a"
+    | "column-b"
+    | "timeline-top"
+    | "timeline-bottom"
+    | "tree-node";
+  stepNumber?: number;
+  timeMarker?: string;
+  parentTitle?: string | null;
+  anchoredFormulas?: ExtractedFormula[];
+}
+
+export interface PlannedConnector {
+  id: string;
+  fromX: number;
+  fromY: number;
+  toX: number;
+  toY: number;
+  pathData: string;
+  style: "bezier" | "chevron" | "elbow" | "divider" | "axis";
+  label?: string;
+  color: string;
+  strokeWidth: number;
+  dashed?: boolean;
+}
+
+export interface PlannedLayout {
+  structureType: StructureType;
+  canvasWidth: number;
+  canvasHeight: number;
+  viewBox: string;
+  centralHub?: {
+    x: number;
+    y: number;
+    rx: number;
+    ry: number;
+    title: string;
+    thesis: string;
+    color: string;
+  };
+  nodes: PlannedNode[];
+  connectors: PlannedConnector[];
+  takeaways: string[];
+  formulas: ExtractedFormula[];
+  compareLabels?: { A: string; B: string };
+  timelineAxis?: { y: number; startX: number; endX: number };
 }

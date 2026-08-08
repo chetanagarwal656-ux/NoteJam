@@ -1041,40 +1041,57 @@ const NoteApp = () => {
     URL.revokeObjectURL(url);
   };
 
+  const getMindmapDimensions = () => {
+    const svg = mindmapSvgRef.current;
+    if (!svg) return { width: 1600, height: 1000 };
+    const viewBoxAttr = svg.getAttribute("viewBox");
+    if (viewBoxAttr) {
+      const parts = viewBoxAttr.split(" ").map(Number);
+      if (parts.length === 4 && parts[2] > 0 && parts[3] > 0) {
+        return { width: parts[2], height: parts[3] };
+      }
+    }
+    return { width: 1600, height: 1000 };
+  };
+
   const serializeMindmapSvg = () => {
     const svg = mindmapSvgRef.current;
     if (!svg) throw new Error("Mind map is not ready yet.");
 
+    const { width, height } = getMindmapDimensions();
     const clone = svg.cloneNode(true) as SVGSVGElement;
     clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
-    clone.setAttribute("width", "1600");
-    clone.setAttribute("height", "1000");
-    clone.setAttribute("viewBox", "0 0 1600 1000");
+    clone.setAttribute("width", String(width));
+    clone.setAttribute("height", String(height));
+    clone.setAttribute("viewBox", `0 0 ${width} ${height}`);
 
     const background = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-    background.setAttribute("width", "1600");
-    background.setAttribute("height", "1000");
-    background.setAttribute("fill", "#fffefa");
+    background.setAttribute("width", String(width));
+    background.setAttribute("height", String(height));
+    background.setAttribute("fill", "#fdfbf7");
     clone.insertBefore(background, clone.firstChild);
 
     return new XMLSerializer().serializeToString(clone);
   };
 
   const svgDataUrlToCanvas = async (svgUrl: string) => {
+    const { width, height } = getMindmapDimensions();
     return await new Promise<HTMLCanvasElement>((resolve, reject) => {
       const image = new Image();
       image.onload = () => {
+        const scale = 2;
         const canvas = document.createElement("canvas");
-        canvas.width = 1600;
-        canvas.height = 1000;
+        canvas.width = width * scale;
+        canvas.height = height * scale;
         const ctx = canvas.getContext("2d");
         if (!ctx) {
           reject(new Error("Could not prepare export canvas."));
           return;
         }
-        ctx.fillStyle = "#fffefa";
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+        ctx.scale(scale, scale);
+        ctx.fillStyle = "#fdfbf7";
+        ctx.fillRect(0, 0, width, height);
+        ctx.drawImage(image, 0, 0, width, height);
         resolve(canvas);
       };
       image.onerror = () => reject(new Error("Could not render mind map export."));
@@ -1115,7 +1132,8 @@ const NoteApp = () => {
       alert("Could not export mind map SVG.");
     }
   };
-  const createPdfFromJpeg = (jpegBytes: Uint8Array) => {
+
+  const createPdfFromJpeg = (jpegBytes: Uint8Array, width = 1600, height = 1000) => {
     const parts: BlobPart[] = [];
     const offsets: number[] = [];
     let offset = 0;
@@ -1131,11 +1149,11 @@ const NoteApp = () => {
     add("%PDF-1.4\n");
     obj(1, "<< /Type /Catalog /Pages 2 0 R >>");
     obj(2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
-    obj(3, "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 1600 1000] /Resources << /XObject << /Im0 5 0 R >> >> /Contents 4 0 R >>");
-    const content = "q\n1600 0 0 1000 0 0 cm\n/Im0 Do\nQ";
+    obj(3, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${width} ${height}] /Resources << /XObject << /Im0 5 0 R >> >> /Contents 4 0 R >>`);
+    const content = `q\n${width} 0 0 ${height} 0 0 cm\n/Im0 Do\nQ`;
     obj(4, `<< /Length ${content.length} >>\nstream\n${content}\nendstream`);
     offsets[5] = offset;
-    add(`5 0 obj\n<< /Type /XObject /Subtype /Image /Width 1600 /Height 1000 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpegBytes.length} >>\nstream\n`);
+    add(`5 0 obj\n<< /Type /XObject /Subtype /Image /Width ${width} /Height ${height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpegBytes.length} >>\nstream\n`);
     add(jpegBytes);
     add("\nendstream\nendobj\n");
 
@@ -1150,10 +1168,11 @@ const NoteApp = () => {
 
   const exportMindmapAsPdf = async () => {
     try {
+      const { width, height } = getMindmapDimensions();
       const canvas = await renderMindmapToCanvas();
       const jpeg = canvas.toDataURL("image/jpeg", 0.95).split(",")[1];
       const bytes = Uint8Array.from(atob(jpeg), (char) => char.charCodeAt(0));
-      downloadBlob(createPdfFromJpeg(bytes), `${noteTitle || "notejam"}-mind-map.pdf`);
+      downloadBlob(createPdfFromJpeg(bytes, width, height), `${noteTitle || "notejam"}-mind-map.pdf`);
     } catch (err) {
       console.error(err);
       alert("Could not export mind map PDF.");

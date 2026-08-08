@@ -1,44 +1,98 @@
-export interface ArrowPathResult {
-  pathD: string;
-  arrowHeadD: string;
-}
+import { PlannedConnector } from "./types";
 
-export const createLoopingArrow = (
-  sx: number,
-  sy: number,
-  ex: number,
-  ey: number,
-  index: number
-): ArrowPathResult => {
-  const dx = ex - sx;
-  const dy = ey - sy;
-  const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+export const createBezierHubPath = (
+  fromX: number,
+  fromY: number,
+  toX: number,
+  toY: number
+): string => {
+  const dx = toX - fromX;
+  const dy = toY - fromY;
+  const dist = Math.hypot(dx, dy);
 
-  // Normal vector
-  const nx = -dy / dist;
-  const ny = dx / dist;
+  // Perpendicular offset for organic sketch curve
+  const normalX = -dy / (dist || 1);
+  const normalY = dx / (dist || 1);
+  const curvature = Math.min(45, Math.max(20, dist * 0.12));
 
-  // Add a playful loop / curl for odd indexes or curved arc for evens
-  const curvature = (index % 2 === 0 ? 60 : -60) * (dist / 400);
+  const cp1X = fromX + dx * 0.35 + normalX * curvature;
+  const cp1Y = fromY + dy * 0.35 + normalY * curvature;
+  const cp2X = fromX + dx * 0.7 + normalX * (curvature * 0.6);
+  const cp2Y = fromY + dy * 0.7 + normalY * (curvature * 0.6);
 
-  // Control points for cubic bezier
-  const c1x = sx + dx * 0.35 + nx * curvature * 1.5;
-  const c1y = sy + dy * 0.35 + ny * curvature * 1.5;
+  return `M ${fromX.toFixed(1)} ${fromY.toFixed(1)} C ${cp1X.toFixed(1)} ${cp1Y.toFixed(1)}, ${cp2X.toFixed(1)} ${cp2Y.toFixed(1)}, ${toX.toFixed(1)} ${toY.toFixed(1)}`;
+};
 
-  const c2x = sx + dx * 0.7 - nx * curvature * 0.8;
-  const c2y = sy + dy * 0.7 - ny * curvature * 0.8;
+export const createSequenceChevronPath = (
+  fromX: number,
+  fromY: number,
+  toX: number,
+  toY: number
+): string => {
+  const dx = toX - fromX;
+  const dy = toY - fromY;
 
-  const pathD = `M ${sx} ${sy} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${ex} ${ey}`;
+  // If mostly horizontal
+  if (Math.abs(dy) < 50) {
+    return `M ${fromX.toFixed(1)} ${fromY.toFixed(1)} L ${toX.toFixed(1)} ${toY.toFixed(1)}`;
+  }
 
-  // Calculate arrow head angle at endpoint from c2 to (ex, ey)
-  const angle = Math.atan2(ey - c2y, ex - c2x);
-  const headLen = 14;
-  const a1x = ex - headLen * Math.cos(angle - Math.PI / 6);
-  const a1y = ey - headLen * Math.sin(angle - Math.PI / 6);
-  const a2x = ex - headLen * Math.cos(angle + Math.PI / 6);
-  const a2y = ey - headLen * Math.sin(angle + Math.PI / 6);
+  // Snake wrap path (e.g. from row 1 end to row 2 start)
+  const midX = fromX + dx * 0.5;
+  return `M ${fromX.toFixed(1)} ${fromY.toFixed(1)} C ${(fromX + 80).toFixed(1)} ${fromY.toFixed(1)}, ${(toX - 80).toFixed(1)} ${toY.toFixed(1)}, ${toX.toFixed(1)} ${toY.toFixed(1)}`;
+};
 
-  const arrowHeadD = `M ${a1x} ${a1y} L ${ex} ${ey} L ${a2x} ${a2y}`;
+export const createElbowTreePath = (
+  fromX: number,
+  fromY: number,
+  toX: number,
+  toY: number
+): string => {
+  const midY = fromY + (toY - fromY) * 0.5;
+  const radius = 8;
 
-  return { pathD, arrowHeadD };
+  // Smooth rounded corners for tree branch
+  const dir = toX > fromX ? 1 : -1;
+  const corner1X = fromX;
+  const corner1Y = midY - radius;
+  const corner2X = fromX + dir * radius;
+  const corner2Y = midY;
+
+  const corner3X = toX - dir * radius;
+  const corner3Y = midY;
+  const corner4X = toX;
+  const corner4Y = midY + radius;
+
+  if (Math.abs(toX - fromX) < 16) {
+    return `M ${fromX.toFixed(1)} ${fromY.toFixed(1)} L ${toX.toFixed(1)} ${toY.toFixed(1)}`;
+  }
+
+  return `M ${fromX.toFixed(1)} ${fromY.toFixed(1)} L ${corner1X.toFixed(1)} ${corner1Y.toFixed(1)} Q ${fromX.toFixed(1)} ${midY.toFixed(1)} ${corner2X.toFixed(1)} ${corner2Y.toFixed(1)} L ${corner3X.toFixed(1)} ${corner3Y.toFixed(1)} Q ${toX.toFixed(1)} ${midY.toFixed(1)} ${corner4X.toFixed(1)} ${corner4Y.toFixed(1)} L ${toX.toFixed(1)} ${toY.toFixed(1)}`;
+};
+
+export const createDividerPath = (
+  x: number,
+  startY: number,
+  endY: number
+): PlannedConnector => {
+  return {
+    id: `divider-${x}`,
+    fromX: x,
+    fromY: startY,
+    toX: x,
+    toY: endY,
+    pathData: `M ${x} ${startY} L ${x} ${endY}`,
+    style: "divider",
+    color: "#cbd5e1",
+    strokeWidth: 2,
+    dashed: true,
+  };
+};
+
+export const createTimelinePinPath = (
+  axisY: number,
+  nodeX: number,
+  cardEdgeY: number
+): string => {
+  return `M ${nodeX.toFixed(1)} ${axisY.toFixed(1)} L ${nodeX.toFixed(1)} ${cardEdgeY.toFixed(1)}`;
 };

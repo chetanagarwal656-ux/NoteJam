@@ -1,4 +1,4 @@
-import { MindmapSectionInput } from "./types";
+import { ExtractedSection, CardDimensions, ImportanceTier } from "./types";
 
 export const wrapLines = (text: string, maxChars: number): string[] => {
   if (!text) return [];
@@ -22,21 +22,72 @@ export const wrapLines = (text: string, maxChars: number): string[] => {
   return lines;
 };
 
-export const calculateCardDimensions = (section: MindmapSectionInput) => {
-  const titleText = (section.title || "").trim();
-  const cardWidth = 270;
+interface SizingSpec {
+  width: number;
+  maxBullets: number;
+  titleChars: number;
+  bulletChars: number;
+  minHeight: number;
+  maxHeight: number;
+}
 
-  const titleLines = wrapLines(titleText, 18);
-  const bulletList = (section.bullets || []).slice(0, 4);
-  const bulletLinesList = bulletList.map((b) => wrapLines(b, 22));
+const SIZING_BY_IMPORTANCE: Record<ImportanceTier, SizingSpec> = {
+  1: {
+    width: 275,
+    maxBullets: 3,
+    titleChars: 24,
+    bulletChars: 32,
+    minHeight: 165,
+    maxHeight: 245,
+  },
+  2: {
+    width: 255,
+    maxBullets: 3,
+    titleChars: 22,
+    bulletChars: 30,
+    minHeight: 145,
+    maxHeight: 215,
+  },
+  3: {
+    width: 225,
+    maxBullets: 2,
+    titleChars: 18,
+    bulletChars: 26,
+    minHeight: 120,
+    maxHeight: 165,
+  },
+};
+
+export const calculateCardDimensions = (
+  section: ExtractedSection,
+  overrideImportance?: ImportanceTier
+): CardDimensions => {
+  const importance = overrideImportance || section.importance || 2;
+  const spec = SIZING_BY_IMPORTANCE[importance] || SIZING_BY_IMPORTANCE[2];
+
+  const titleText = (section.title || "Concept").trim();
+  const rawTitleLines = wrapLines(titleText, spec.titleChars);
+  const titleLines = rawTitleLines.slice(0, 2);
+
+  const bulletList = (section.bullets || []).slice(0, spec.maxBullets);
+  const wrappedBullets = bulletList.map((b) => wrapLines(b, spec.bulletChars).slice(0, 2));
 
   let totalBulletsHeight = 0;
-  bulletLinesList.forEach((lines) => {
-    totalBulletsHeight += lines.length * 20 + 8;
+  wrappedBullets.forEach((lines) => {
+    totalBulletsHeight += lines.length * 17 + 8;
   });
 
-  const titleHeight = titleLines.length * 24 + 10;
-  const cardHeight = Math.max(180, 45 + titleHeight + totalBulletsHeight + 25);
+  const headerClearance = 36; // Icon + Cue badge
+  const titleHeight = titleLines.length * 20 + 8;
+  const bottomPadding = 14;
 
-  return { cardWidth, cardHeight, titleLines, bulletLinesList };
+  const computedHeight = headerClearance + titleHeight + totalBulletsHeight + bottomPadding;
+  const height = Math.max(spec.minHeight, Math.min(spec.maxHeight, computedHeight));
+
+  return {
+    width: spec.width,
+    height,
+    titleLines,
+    wrappedBullets,
+  };
 };

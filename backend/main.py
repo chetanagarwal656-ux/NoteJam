@@ -556,53 +556,73 @@ def create_cheatsheet(req: DocumentRequest):
 @app.post("/mindmap")
 def create_mindmap(req: DocumentRequest):
     prompt = f"""
-    You are the content architect for NoteJam's deterministic vector mind-map renderer.
-    Your job is to turn lecture notes into a concise, visual revision-sheet data model.
-    Do NOT describe layout coordinates. Do NOT create SVG. Extract only the educational content and its priority.
+    You are the lead content architect for NoteJam's content-adaptive vector revision sheet renderer.
+    Your job is to analyze lecture notes, classify their intrinsic structural archetype, and extract a high-signal revision data model.
+    Do NOT describe layout coordinates or SVG.
 
-    Return ONLY a strictly valid JSON object using this exact schema:
+    First, classify the natural shape of this lecture's knowledge and set `structureType`:
+    - "sequence": For processes, algorithms, protocols, step-by-step executions, or cause->effect chains.
+    - "hierarchy": For taxonomies, classifications, system architectures, or types-and-subtypes trees.
+    - "comparison": For lectures fundamentally contrasting two things ("X vs Y", "TCP vs UDP", pros/cons).
+    - "timeline": For chronological evolutions or historical milestones.
+    - "hub": For general conceptual or definitional topics revolving around one central theme (default/fallback).
+
+    Return ONLY a strictly valid JSON object with this exact schema:
     {{
-      "version": "revision-sheet-v1",
+      "version": "revision-sheet-v2",
       "title": "2-6 word revision title",
-      "centralConcept": "2-5 word central concept",
-      "thesis": "one short sentence explaining the big idea",
+      "centralConcept": "2-5 word central concept (<=28 chars)",
+      "thesis": "one short sentence capturing the single big idea",
+      "structureType": "hub|sequence|hierarchy|comparison|timeline",
       "sections": [
         {{
-          "title": "short section heading",
-          "cue": "tiny question label, e.g. What is it?",
+          "title": "short section heading (<=26 chars)",
+          "cue": "tiny question/role cue (e.g. 'What is it?', 'How it Works', 'Core Rule')",
           "kind": "definition|formula|process|example|application|warning|result",
           "importance": 1,
-          "icon": "speech|bulb|arrow|gear|box|pencil|target|chart|formula|book|atom|code|dice",
-          "bullets": ["2-4 concise facts from the notes"],
-          "formulas": ["optional short formula"],
-          "examples": ["optional short example"]
+          "icon": "bulb|gear|box|target|chart|formula|book|atom|code|warning|check",
+          "bullets": [
+            "complete standalone phrase (<=48 chars)",
+            "complete standalone phrase (<=48 chars)"
+          ],
+          "parentTitle": null,
+          "compareGroup": null,
+          "timeMarker": null
         }}
       ],
-      "examples": [
-        {{"label": "example name", "detail": "one short detail"}}
-      ],
+      "flow": ["Exact Section Title A", "Exact Section Title B"],
       "formulas": [
-        {{"label": "formula/rule name", "detail": "short formula or condition"}}
+        {{"label": "formula name", "detail": "concise equation or condition", "relatedSection": "optional section title"}}
       ],
-      "takeaways": ["2-4 short exam/revision takeaways"],
-      "flow": ["3-6 short step labels"]
+      "examples": [
+        {{"label": "example name", "detail": "short real-world detail", "relatedSection": "optional section title"}}
+      ],
+      "takeaways": [
+        "concise exam takeaway bullet (<=60 chars)",
+        "concise exam takeaway bullet (<=60 chars)"
+      ],
+      "compareGroupLabels": {{"A": "left entity name", "B": "right entity name"}}
     }}
 
-    Quality rules:
-    - Generate 5 to 6 sections only. Fewer high-quality sections are better than crowded maps.
-    - Every section must contain real lecture content. Never write placeholders like Key idea or Main relationship.
-    - Keep centralConcept under 28 characters and 2 to 4 words. Do not use ellipses.
-    - Keep section titles under 26 characters.
-    - Keep each bullet under 48 characters.
-    - Use 2 or 3 bullets per section. Do not return paragraphs.
-    - Put formulas in formulas arrays, not buried in long paragraphs.
-    - Keep formula strings under 34 characters.
-    - Include examples only when they were actually taught in the notes.
-    - Make the content sparse enough for one readable page.
-    - If the lecture is mathematical, prefer definitions, conditions, formulas, examples, and derived results.
-    - Choose section kinds intentionally; do not mark every section as definition.
-    - Put examples, applications, and derived results into examples/formulas/takeaways when possible so the renderer can place them as support cards.
-    - Avoid title fragments ending with "for", "with", or "using".
+    Strict Rules & Guidelines:
+    1. Structure Rules:
+       - When structureType is "sequence" or "timeline": `flow` MUST list section titles in exact execution/chronological order, and every entry must match a `sections[].title`. Use `timeMarker` (e.g. "Step 1", "Phase 2", "1983").
+       - When structureType is "hierarchy": set `parentTitle` on subtopics to point to their parent `sections[].title`. Deep chains (root -> subcategory -> leaf) are encouraged.
+       - When structureType is "comparison": every section must have `compareGroup` of "A" or "B", and `compareGroupLabels` must explicitly name A and B.
+       - For "hub": generate 4 to 6 high-quality sections with clear priority.
+    2. Section Count & Sizing:
+       - Generate 5 to 7 sections total. Keep quality and brevity high.
+       - Assign `importance` (1, 2, or 3). Tag 1-3 primary concepts as `importance: 1`, secondary details as `2`, and compact chips as `3`.
+    3. Bullet Quality:
+       - Write each bullet as a complete, standalone revision phrase a student could read aloud.
+       - NEVER truncate mid-thought or write fragmented labels like "Program Execution (Crucial)".
+       - Maximum 48 characters per bullet, 2 to 3 bullets per section.
+    4. Formulas, Examples & Takeaways:
+       - Extract standalone formulas and practical examples into their dedicated arrays with `relatedSection` when taught in notes.
+       - Include 2 to 4 high-yield `takeaways` for exam revision.
+    5. Icons & Kinds:
+       - Choose `kind` intentionally (`definition`, `formula`, `process`, `example`, `application`, `warning`, `result`).
+       - Choose matching `icon` from the allowed set.
 
     Notes:
     {req.markdown}
@@ -610,7 +630,7 @@ def create_mindmap(req: DocumentRequest):
     try:
         raw_text = robust_gemini_call(contents=[prompt], is_json=True)
         data = parse_json_response(raw_text)
-        data["version"] = "revision-sheet-v1"
+        data["version"] = "revision-sheet-v2"
         return {"mindmap": data}
     except Exception as e:
         print(f"Error generating mindmap: {e}")
