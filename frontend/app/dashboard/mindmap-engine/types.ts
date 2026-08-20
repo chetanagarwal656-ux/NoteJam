@@ -180,3 +180,42 @@ export interface PlannedLayout {
   compareLabels?: { A: string; B: string };
   timelineAxis?: { y: number; startX: number; endX: number };
 }
+
+export type MindmapTheme = "infographic" | "revision";
+
+export interface InfographicTerminal {
+  x: number;
+  y: number;
+  color: string;
+}
+
+export interface InfographicBranch {
+  id: string;
+  section: ExtractedSection;
+  theme: CardTheme;
+  terminal: InfographicTerminal;
+  discCenter: { x: number; y: number };
+  discRadius: number;
+  conduitPath: string;
+  color: string;
+  textAnchor: "start" | "middle" | "end";
+  textAlign: "left" | "right" | "center";
+  titlePos: { x: number; y: number };
+  textLines: string[];
+  textStartPos: { x: number; y: number };
+}
+
+export interface PlannedInfographicLayout {
+  canvasWidth: number;
+  canvasHeight: number;
+  viewBox: string;
+  centralDome: {
+    cx: number;
+    cy: number;
+    r: number;
+    title: string;
+    thesis?: string;
+  };
+  branches: InfographicBranch[];
+  takeaways: string[];
+}

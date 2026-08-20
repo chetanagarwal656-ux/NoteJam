@@ -5,7 +5,7 @@ import subprocess
 import time
 import json
 from typing import Optional
-from fastapi import FastAPI, UploadFile, Form, HTTPException
+from fastapi import FastAPI, UploadFile, Form, HTTPException, Header, Depends
 from pydantic import BaseModel
 import threading
 from fastapi.staticfiles import StaticFiles
@@ -15,6 +15,8 @@ import yt_dlp
 from dotenv import load_dotenv
 import sqlite3
 from datetime import datetime
+import jwt
+from jwt import PyJWKClient
 
 load_dotenv()
 
@@ -57,6 +59,10 @@ def init_db():
         cursor.execute("ALTER TABLE notes ADD COLUMN ai_debate_url TEXT")
     except sqlite3.OperationalError:
         pass
+    try:
+        cursor.execute("ALTER TABLE notes ADD COLUMN user_id TEXT")
+    except sqlite3.OperationalError:
+        pass
     conn.commit()
     conn.close()
 
@@ -78,6 +84,49 @@ os.makedirs(TEMP_DIR, exist_ok=True)
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
+# --- Clerk JWT Authentication ---
+CLERK_JWKS_URL = os.getenv("CLERK_JWKS_URL", "")
+jwk_client = PyJWKClient(CLERK_JWKS_URL) if CLERK_JWKS_URL else None
+
+def get_current_user_id(authorization: str = Header(None)) -> str:
+    if not jwk_client:
+        raise HTTPException(status_code=500, detail="Auth not configured")
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
+    token = authorization.removeprefix("Bearer ")
+    try:
+        signing_key = jwk_client.get_signing_key_from_jwt(token)
+        payload = jwt.decode(token, signing_key.key, algorithms=["RS256"])
+        user_id = payload.get("sub")
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Invalid token: no sub claim")
+        return user_id
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    except Exception:
+        raise HTTPException(status_code=401, detail="Authentication failed")
+
+import subprocess
+
+def get_silence_bytes(duration_ms: int) -> bytes:
+    filepath = os.path.join(STATIC_DIR, f"silence_{duration_ms}.mp3")
+    if not os.path.exists(filepath):
+        duration_sec = duration_ms / 1000.0
+        subprocess.run([
+            "ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=24000:cl=mono",
+            "-t", str(duration_sec), "-b:a", "48k", filepath
+        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if os.path.exists(filepath):
+        with open(filepath, "rb") as f:
+            return f.read()
+    return b""
+
+SILENCE_SENTENCE_END = get_silence_bytes(350)
+SILENCE_SPEAKER_TURN = get_silence_bytes(550)
+SILENCE_EXCLAMATION = get_silence_bytes(250)
+
 client = genai.Client(http_options={'timeout': 3600000}) 
 
 def get_public_base_url() -> str:
@@ -92,6 +141,9 @@ def parse_json_response(raw_text: str):
     elif cleaned.startswith("```"):
         cleaned = re.sub(r"^```\s*", "", cleaned)
         cleaned = re.sub(r"\s*```$", "", cleaned)
+
+    # Attempt to fix invalid JSON escapes (e.g. \- or \.) often produced by LLMs
+    cleaned = re.sub(r'\\([^"\\/bfnrtu])', r'\1', cleaned)
 
     try:
         return json.loads(cleaned)
@@ -429,6 +481,7 @@ def process_video_and_generate_notes(video_path: str, language: str = "English")
                 detail="This lecture is too dense to process even in 25-minute chunks. Please try a shorter lecture segment or upload a trimmed part of the video."
             ) from e
 
+
 def download_video_from_url(url: str) -> str:
     from typing import Any
     video_path = os.path.join(TEMP_DIR, f"{uuid.uuid4()}.mp4")
@@ -439,15 +492,37 @@ def download_video_from_url(url: str) -> str:
         'nocheckcertificate': True,
         'retries': 10,
         'fragment_retries': 10,
-        'socket_timeout': 30
+        'socket_timeout': 30,
+        # YouTube now requires JS challenge solving for stream URLs.
+        # Use node to solve ciphers and web_embedded client to avoid 403.
+        'js_runtimes': {'node': {}},
+        'extractor_args': {'youtube': {'player_client': ['web_embedded']}},
     }
+
+    cookies_file = os.getenv("YTDLP_COOKIES_FILE", "").strip()
+    if cookies_file:
+        if not os.path.isabs(cookies_file):
+            cookies_file = os.path.join(BASE_DIR, cookies_file)
+        if os.path.isfile(cookies_file):
+            ydl_opts['cookiefile'] = cookies_file
+
     print(f"Downloading from URL: {url}")
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
-    except Exception:
+    except Exception as error:
         if os.path.exists(video_path):
             os.remove(video_path)
+        error_message = str(error).lower()
+        if (
+            "confirm you're not a bot" in error_message
+            or "http error 403" in error_message
+            or "http error 429" in error_message
+        ):
+            raise ValueError(
+                "YouTube blocked this download request. Add or refresh a signed-in "
+                "YouTube cookies file using YTDLP_COOKIES_FILE in backend/.env, then retry."
+            ) from error
         raise
     return video_path
 
@@ -469,6 +544,10 @@ def run_process_job(job_id: str, language: str, url: Optional[str] = None, video
         print(f"Error processing video job {job_id}: {e}")
         if is_token_limit_error(e):
             message = "This lecture is too dense to process even in 25-minute chunks. Please try a shorter lecture segment."
+        elif str(e).startswith("YouTube blocked this download request") or str(e).startswith("YTDLP_COOKIES_FILE"):
+            message = str(e)
+        elif "Google Gemini API rate limit or quota limit" in str(e):
+            message = str(e)
         else:
             message = "NoteJam could not process this lecture. Please try another link or upload the video file directly."
         update_process_job(job_id, status="failed", message=message)
@@ -480,7 +559,8 @@ def run_process_job(job_id: str, language: str, url: Optional[str] = None, video
 async def process_lecture(
     url: Optional[str] = Form(None),
     file: Optional[UploadFile] = None,
-    language: str = Form("English")
+    language: str = Form("English"),
+    user_id: str = Depends(get_current_user_id)
 ):
     if not url and not file:
         raise HTTPException(status_code=400, detail="Must provide either a url or a file.")
@@ -504,7 +584,7 @@ async def process_lecture(
     return {"job_id": job_id, "status": "queued", "message": "Preparing your lecture..."}
 
 @app.get("/process/{job_id}")
-def get_process_job(job_id: str):
+def get_process_job(job_id: str, user_id: str = Depends(get_current_user_id)):
     with PROCESS_JOBS_LOCK:
         job = PROCESS_JOBS.get(job_id)
     if not job:
@@ -515,7 +595,7 @@ class FlashcardRequest(BaseModel):
     markdown: str
 
 @app.post("/flashcards")
-def create_flashcards(req: FlashcardRequest):
+def create_flashcards(req: FlashcardRequest, user_id: str = Depends(get_current_user_id)):
     prompt = f"""
     Based on the following lecture notes, create a highly effective set of spaced-repetition flashcards.
     Depending on the depth and length of the notes, generate anywhere from 10 to 50 flashcards (10 being the minimum, 50 being the maximum).
@@ -537,7 +617,7 @@ class DocumentRequest(BaseModel):
     markdown: str
 
 @app.post("/cheatsheet")
-def create_cheatsheet(req: DocumentRequest):
+def create_cheatsheet(req: DocumentRequest, user_id: str = Depends(get_current_user_id)):
     prompt = f"""
     Based on the following lecture notes, extract 3-7 critical formulas, equations, or short key definitions.
     Return ONLY a valid JSON array of strings. No markdown formatting outside the JSON array.
@@ -554,7 +634,7 @@ def create_cheatsheet(req: DocumentRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/mindmap")
-def create_mindmap(req: DocumentRequest):
+def create_mindmap(req: DocumentRequest, user_id: str = Depends(get_current_user_id)):
     prompt = f"""
     You are the lead content architect for NoteJam's content-adaptive vector revision sheet renderer.
     Your job is to analyze lecture notes, classify their intrinsic structural archetype, and extract a high-signal revision data model.
@@ -640,7 +720,7 @@ class SimplifyRequest(BaseModel):
     text: str
 
 @app.post("/simplify")
-def simplify_text(req: SimplifyRequest):
+def simplify_text(req: SimplifyRequest, user_id: str = Depends(get_current_user_id)):
     prompt = f"""
     You are an expert, empathetic tutor. Your task is to take the following complex academic text 
     and explain it simply, as if you were talking to a beginner or a 5-year-old.
@@ -667,7 +747,7 @@ class ChatRequest(BaseModel):
     history: list[ChatMessage]
 
 @app.post("/chat")
-def chat_lecture(req: ChatRequest):
+def chat_lecture(req: ChatRequest, user_id: str = Depends(get_current_user_id)):
     history_text = ""
     for msg in req.history:
         role_name = "Student" if msg.role == "user" else "Assistant"
@@ -701,7 +781,7 @@ class PodcastRequest(BaseModel):
     scenario: str = "podcast"
 
 @app.post("/podcast")
-async def generate_podcast(req: PodcastRequest):
+async def generate_podcast(req: PodcastRequest, user_id: str = Depends(get_current_user_id)):
     try:
         scenario_desc = ""
         if req.scenario == "podcast":
@@ -720,17 +800,23 @@ Host 1: Chetan (Curious, insightful, drives the conversation, asks great questio
 Host 2: Anamika (Knowledgeable Indian college girl, connects dots, provides deep intuitions, clears misconceptions, shows excitement)
 
 CRITICAL INSTRUCTION FOR NATURAL SPEECH:
-DO NOT use commas (,) unless absolutely grammatically necessary. Commas force the AI TTS to take awkward, robotic pauses. 
-Instead of writing: "Humayu, achha vo akbar ka pita", write it naturally like: "Achha Humayu jo akbar ka pita tha".
-Make the flow continuous, expressive, and human-like. Add emotion and natural reactions (like "Wow", "Oh I see", "Mind blowing").
+1. USE NATURAL PUNCTUATION. Use commas (,) for short pauses, periods (.) for strong boundaries, and question marks (?) for interrogative intonation.
+2. INCLUDE REACTION LATENCY AND OVERLAP. Start responses with natural hesitation markers or micro-reactions (e.g., "Yeah...", "Wait-", "Right, but...", "uh...", "I mean...").
+3. VARY THE SENTENCE LENGTH. Break down information-dense explanations into shorter, rhythmic phrases.
 
 The script MUST be returned as a raw JSON array of objects, with NO markdown formatting, NO ```json blocks. Just the raw JSON array.
+Each object must have:
+- "speaker": "Chetan" or "Anamika"
+- "text": The spoken text
+- "emotion": A short string like "excited", "curious", "calm", "surprised", "emphatic"
+- "is_question": true/false (true if the primary intent is asking a question)
+
 Example:
 [
-  {{"speaker": "Chetan", "text": "Hi Anamika aaj hum kis baare me baat karne wale hain"}},
-  {{"speaker": "Anamika", "text": "Haan Chetan aaj ka topic sach me mind blowing hai"}},
-  {{"speaker": "Chetan", "text": "Are waah mujhe detail me batao"}},
-  {{"speaker": "Anamika", "text": "Bilkul! To shuru karte hain..."}}
+  {{"speaker": "Chetan", "text": "Hi Anamika, aaj hum kis baare me baat karne wale hain?", "emotion": "curious", "is_question": true}},
+  {{"speaker": "Anamika", "text": "Haan Chetan... aaj ka topic sach me mind blowing hai.", "emotion": "excited", "is_question": false}},
+  {{"speaker": "Chetan", "text": "Are waah! Mujhe detail me batao.", "emotion": "surprised", "is_question": false}},
+  {{"speaker": "Anamika", "text": "Bilkul! To shuru karte hain.", "emotion": "emphatic", "is_question": false}}
 ]
 
 Lecture Notes:
@@ -758,11 +844,39 @@ Lecture Notes:
             
         script = parse_json_response(raw_text)
         import edge_tts
+        import asyncio
+        import re
         final_audio = b""
         
-        for line in script:
+        async def generate_chunk_audio(text_chunk, voice, pitch, rate, volume):
+            audio_bytes = b""
+            for tts_attempt in range(3):
+                try:
+                    communicate = edge_tts.Communicate(text_chunk, voice, pitch=pitch, rate=rate, volume=volume)
+                    async for chunk in communicate.stream():
+                        if chunk["type"] == "audio":
+                            audio_bytes += chunk["data"]
+                    return audio_bytes
+                except Exception as tts_err:
+                    if tts_attempt < 2:
+                        await asyncio.sleep(2)
+                    else:
+                        raise tts_err
+            return b""
+        
+        EMOTION_TO_PARAMS = {
+            "excited":   {"rate": "+8%",  "pitch": "+8Hz",  "volume": "+0%"},
+            "curious":   {"rate": "+2%",  "pitch": "+4Hz",  "volume": "+0%"},
+            "calm":      {"rate": "-8%",  "pitch": "-2Hz",  "volume": "+0%"},
+            "surprised": {"rate": "+10%", "pitch": "+12Hz", "volume": "+0%"},
+            "emphatic":  {"rate": "+3%",  "pitch": "+2Hz",  "volume": "+10%"},
+        }
+        
+        for line_idx, line in enumerate(script):
             speaker = line.get("speaker", "Chetan")
             text = line.get("text", "")
+            emotion = line.get("emotion", "calm")
+            is_question = line.get("is_question", False)
             if not text: continue
             
             if req.language.lower() == "english":
@@ -770,21 +884,43 @@ Lecture Notes:
             else:
                 voice = "hi-IN-MadhurNeural" if "Chetan" in speaker else "hi-IN-SwaraNeural"
                 
-            # Retry mechanism for Edge-TTS networking issues
-            for tts_attempt in range(3):
-                try:
-                    communicate = edge_tts.Communicate(text, voice)
-                    async for chunk in communicate.stream():
-                        if chunk["type"] == "audio":
-                            final_audio += chunk["data"]
-                    break # Success, break out of retry loop
-                except Exception as tts_err:
-                    if tts_attempt < 2:
-                        import asyncio
-                        print(f"TTS connection error: {tts_err}. Retrying in 2 seconds...")
-                        await asyncio.sleep(2)
-                    else:
-                        raise tts_err
+            raw_chunks = re.split(r'([.?!]+)', text)
+            
+            chunks = []
+            for i in range(0, len(raw_chunks), 2):
+                part = raw_chunks[i]
+                punct = raw_chunks[i+1] if i+1 < len(raw_chunks) else ""
+                combined = (part + punct).strip()
+                if combined:
+                    chunks.append((combined, punct))
+            
+            tasks = []
+            for chunk_text, punct in chunks:
+                params = EMOTION_TO_PARAMS.get(emotion, {"rate": "+0%", "pitch": "+0Hz", "volume": "+0%"})
+                pitch = params["pitch"]
+                rate = params["rate"]
+                volume = params["volume"]
+                
+                if is_question or '?' in punct:
+                    # Subtle baseline lift instead of +15Hz
+                    pitch = "+4Hz"
+                    
+                tasks.append(generate_chunk_audio(chunk_text, voice, pitch, rate, volume))
+                
+            chunk_audios = await asyncio.gather(*tasks)
+            
+            for i, (chunk_text, punct) in enumerate(chunks):
+                final_audio += chunk_audios[i]
+                
+                if '?' in punct:
+                    final_audio += SILENCE_SENTENCE_END
+                elif '!' in punct:
+                    final_audio += SILENCE_EXCLAMATION
+                elif '.' in punct:
+                    final_audio += SILENCE_SENTENCE_END
+                    
+            if line_idx < len(script) - 1:
+                final_audio += SILENCE_SPEAKER_TURN
             
         filename = f"podcast_{uuid.uuid4().hex[:8]}.mp3"
         filepath = os.path.join(STATIC_DIR, filename)
@@ -822,15 +958,15 @@ class NoteData(BaseModel):
     ai_debate_url: Optional[str] = None
 
 @app.post("/notes")
-def save_note(note: NoteData):
+def save_note(note: NoteData, user_id: str = Depends(get_current_user_id)):
     note_id = uuid.uuid4().hex
     created_at = datetime.now().isoformat()
     
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("""
-        INSERT INTO notes (id, title, video_url, markdown, cheatsheet, mindmap, flashcards, created_at, ai_podcast_url, ai_debate_url)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO notes (id, title, video_url, markdown, cheatsheet, mindmap, flashcards, created_at, ai_podcast_url, ai_debate_url, user_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         note_id,
         note.title,
@@ -841,7 +977,8 @@ def save_note(note: NoteData):
         json.dumps(note.flashcards) if note.flashcards else None,
         created_at,
         note.ai_podcast_url,
-        note.ai_debate_url
+        note.ai_debate_url,
+        user_id
     ))
     conn.commit()
     conn.close()
@@ -849,21 +986,21 @@ def save_note(note: NoteData):
     return {"id": note_id, "message": "Note saved successfully"}
 
 @app.get("/notes")
-def get_notes():
+def get_notes(user_id: str = Depends(get_current_user_id)):
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-    cursor.execute("SELECT id, title, created_at, video_url FROM notes ORDER BY created_at DESC")
+    cursor.execute("SELECT id, title, created_at, video_url FROM notes WHERE user_id = ? ORDER BY created_at DESC", (user_id,))
     notes = [dict(row) for row in cursor.fetchall()]
     conn.close()
     return {"notes": notes}
 
 @app.get("/notes/{note_id}")
-def get_note(note_id: str):
+def get_note(note_id: str, user_id: str = Depends(get_current_user_id)):
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM notes WHERE id = ?", (note_id,))
+    cursor.execute("SELECT * FROM notes WHERE id = ? AND user_id = ?", (note_id, user_id))
     row = cursor.fetchone()
     conn.close()
     
@@ -878,13 +1015,13 @@ def get_note(note_id: str):
     return data
 
 @app.put("/notes/{note_id}")
-def update_note(note_id: str, note: NoteData):
+def update_note(note_id: str, note: NoteData, user_id: str = Depends(get_current_user_id)):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("""
         UPDATE notes 
         SET title = ?, video_url = ?, markdown = ?, cheatsheet = ?, mindmap = ?, flashcards = ?, ai_podcast_url = ?, ai_debate_url = ?
-        WHERE id = ?
+        WHERE id = ? AND user_id = ?
     """, (
         note.title,
         note.video_url or "",
@@ -894,17 +1031,18 @@ def update_note(note_id: str, note: NoteData):
         json.dumps(note.flashcards) if note.flashcards else None,
         note.ai_podcast_url,
         note.ai_debate_url,
-        note_id
+        note_id,
+        user_id
     ))
     conn.commit()
     conn.close()
     return {"message": "Note updated"}
 
 @app.delete("/notes/{note_id}")
-def delete_note(note_id: str):
+def delete_note(note_id: str, user_id: str = Depends(get_current_user_id)):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute("DELETE FROM notes WHERE id = ?", (note_id,))
+    cursor.execute("DELETE FROM notes WHERE id = ? AND user_id = ?", (note_id, user_id))
     conn.commit()
     conn.close()
     return {"message": "Note deleted"}

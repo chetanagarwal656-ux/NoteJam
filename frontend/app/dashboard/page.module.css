@@ -928,19 +928,48 @@
 
 .cheatsheetItem {
   color: #f8fafc;
-  font-size: 0.85rem;
-  line-height: 1.5;
-  padding: 0.75rem;
-  background: rgba(255,255,255,0.05);
-  border-radius: 8px;
-  margin-bottom: 0.75rem;
-  border: 1px solid rgba(255,255,255,0.03);
-  transition: all 0.2s ease;
+  padding: 1.1rem 1.25rem;
+  background: linear-gradient(145deg, rgba(14, 27, 36, 0.85), rgba(7, 14, 20, 0.9));
+  border-radius: 12px;
+  border: 1px solid rgba(86, 212, 245, 0.15);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+  transition: all 0.25s ease;
+  break-inside: avoid;
+  margin-bottom: 1rem;
 }
 
 .cheatsheetItem:hover {
-  background: rgba(255,255,255,0.1);
-  transform: translateX(4px);
+  background: linear-gradient(145deg, rgba(20, 38, 50, 0.95), rgba(10, 20, 28, 0.95));
+  border-color: rgba(86, 212, 245, 0.4);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.35), 0 0 15px rgba(86, 212, 245, 0.1);
+}
+
+.cheatsheetTitle {
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: #5eead4;
+  margin-bottom: 0.5rem;
+  letter-spacing: 0.02em;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.cheatsheetTitle::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  background: #2dd4bf;
+  border-radius: 50%;
+  box-shadow: 0 0 6px #2dd4bf;
+}
+
+.cheatsheetContent {
+  font-size: 0.88rem;
+  line-height: 1.6;
+  color: #e2e8f0;
 }
 
 .cheatsheetItem p {
@@ -1717,7 +1746,6 @@
   background: rgba(255, 255, 255, 0.08) !important;
 }
 
-.cheatsheetItem,
 .chatMessageBot,
 .chatMessage.assistant {
   background: rgba(255, 255, 255, 0.06) !important;
@@ -1880,7 +1908,6 @@
 .closeModalBtn,
 .deleteBtn,
 .timestampBtn,
-.cheatsheetItem,
 .chatMessageBot,
 .chatMessage.assistant {
   background: rgba(222, 247, 253, 0.06) !important;
@@ -1906,10 +1933,33 @@
   color: #d8e8ee !important;
 }
 
-.flashcardFront,
-.flashcardBack {
+.flashcardFront {
   background: linear-gradient(145deg, rgba(238, 248, 251, 0.96), rgba(178, 196, 203, 0.94)) !important;
   color: #061116 !important;
+}
+
+.flashcardBack {
+  background: linear-gradient(145deg, #fdfbf7, #eee7da) !important;
+  color: #1a1614 !important;
+}
+
+.flashcardExplanationBtn {
+  background: rgba(0, 0, 0, 0.05);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  color: #1a1614;
+  padding: 0.4rem 0.8rem;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.flashcardExplanationBtn:hover {
+  background: rgba(0, 0, 0, 0.08);
 }
 
 .chatMessageUser,
@@ -2930,13 +2980,36 @@
   justify-content: center;
 }
 
-.inlineCheatsheet,
 .inlineFlashcards,
 .audioArtifact,
 .inlineChat {
   display: flex;
   flex-direction: column;
   gap: 0.85rem;
+}
+
+.inlineCheatsheet {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.inlineCheatsheet.expandedGrid {
+  display: block;
+  column-count: 1;
+  column-gap: 1.5rem;
+}
+
+@media (min-width: 800px) {
+  .inlineCheatsheet.expandedGrid {
+    column-count: 2;
+  }
+}
+
+@media (min-width: 1200px) {
+  .inlineCheatsheet.expandedGrid {
+    column-count: 3;
+  }
 }
 
 .inlineMindmap,

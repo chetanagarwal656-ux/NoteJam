@@ -260,8 +260,17 @@ const GenerationLoadingStage = () => {
 
 // --- APP WORKSPACE COMPONENT ---
 const NoteApp = () => {
-  const { isSignedIn, isLoaded } = useAuth();
+  const { isSignedIn, isLoaded, getToken } = useAuth();
   const clerk = useClerk();
+
+  const authFetch = useCallback(async (url: string, options: RequestInit = {}): Promise<Response> => {
+    const token = await getToken();
+    const headers = new Headers(options.headers || {});
+    if (token) {
+      headers.set("Authorization", `Bearer ${token}`);
+    }
+    return fetch(url, { ...options, headers });
+  }, [getToken]);
   
   const [url, setUrl] = useState("");
   const [file, setFile] = useState<File | null>(null);
@@ -341,13 +350,13 @@ const NoteApp = () => {
   const fetchNotes = useCallback(async () => {
     if (!isLoaded || !isSignedIn) return; // Do not fetch if auth is not ready or not signed in
     try {
-      const res = await fetch(`${API_BASE}/notes`);
+      const res = await authFetch(`${API_BASE}/notes`);
       const data = await res.json();
       setSavedNotes(data.notes || []);
     } catch (e) {
       console.error(e);
     }
-  }, [isLoaded, isSignedIn]);
+  }, [isLoaded, isSignedIn, authFetch]);
 
   useEffect(() => {
     if (currentView === "notebooks") {
@@ -381,7 +390,7 @@ const NoteApp = () => {
       const url = isUpdate ? `${API_BASE}/notes/${currentNoteId}` : `${API_BASE}/notes`;
       const method = isUpdate ? "PUT" : "POST";
 
-      const res = await fetch(url, {
+      const res = await authFetch(url, {
         method,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -412,7 +421,7 @@ const NoteApp = () => {
 
   const loadNote = useCallback(async (id: string, targetView: "home" | "notebooks" = "notebooks") => {
     try {
-      const res = await fetch(`${API_BASE}/notes/${id}`);
+      const res = await authFetch(`${API_BASE}/notes/${id}`);
       if (!res.ok) throw new Error("Not found");
       const data = await res.json();
       setMarkdown(data.markdown);
@@ -474,7 +483,7 @@ const NoteApp = () => {
   const deleteNote = async (id: string) => {
     if (!confirm("Are you sure you want to delete this note?")) return;
     try {
-      await fetch(`${API_BASE}/notes/${id}`, { method: "DELETE" });
+      await authFetch(`${API_BASE}/notes/${id}`, { method: "DELETE" });
       setSavedNotes(prev => prev.filter(n => n.id !== id));
       if (currentNoteId === id) {
         setMarkdown(null);
@@ -551,7 +560,7 @@ const NoteApp = () => {
       }
       formData.append("language", language);
 
-      const response = await fetch(`${API_BASE}/process`, {
+      const response = await authFetch(`${API_BASE}/process`, {
         method: "POST",
         body: formData,
       });
@@ -590,7 +599,7 @@ const NoteApp = () => {
 
     for (let attempt = 0; attempt < 720; attempt += 1) {
       await new Promise((resolve) => window.setTimeout(resolve, 5000));
-      const response = await fetch(`${API_BASE}/process/${jobId}`);
+      const response = await authFetch(`${API_BASE}/process/${jobId}`);
       if (!response.ok) {
         const errData = await response.json();
         throw new Error(errData.detail || "Could not check note generation progress.");
@@ -638,7 +647,7 @@ const NoteApp = () => {
 
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
-        const response = await fetch(`${API_BASE}${endpoint}`, {
+        const response = await authFetch(`${API_BASE}${endpoint}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
@@ -666,7 +675,7 @@ const NoteApp = () => {
     if (!currentNoteId || !markdown) return;
 
     try {
-      await fetch(`${API_BASE}/notes/${currentNoteId}`, {
+      await authFetch(`${API_BASE}/notes/${currentNoteId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -773,7 +782,7 @@ const NoteApp = () => {
     setEli5Explanation(null);
     setSelectionPos(null); // hide the floating button
     try {
-      const res = await fetch(`${API_BASE}/simplify`, {
+      const res = await authFetch(`${API_BASE}/simplify`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: selectedText })
@@ -800,7 +809,7 @@ const NoteApp = () => {
     setIsChatLoading(true);
     
     try {
-      const res = await fetch(`${API_BASE}/chat`, {
+      const res = await authFetch(`${API_BASE}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -967,12 +976,8 @@ const NoteApp = () => {
           className={`${styles.flashcardContainer} ${isFlipped ? styles.flipped : ""}`}
           style={isExpanded ? { height: 'min(58vh, 520px)' } : {}}
           onClick={() => {
-            if (!isFlipped) {
-              setIsFlipped(true);
-            } else if (!showFlashcardExplanation && flashcards[flashcardIndex].explanation) {
-              setShowFlashcardExplanation(true);
-            } else {
-              setIsFlipped(false);
+            setIsFlipped(!isFlipped);
+            if (isFlipped) {
               setShowFlashcardExplanation(false);
             }
           }}
@@ -991,13 +996,26 @@ const NoteApp = () => {
                 <FlashcardRichText text={flashcards[flashcardIndex].answer} />
               </div>
               {isFlipped && flashcards[flashcardIndex].explanation && (
-                <div className={styles.flashcardExplanation} style={{ opacity: showFlashcardExplanation ? 1 : 0 }}>
+                <div className={styles.flashcardExplanation} style={{ opacity: showFlashcardExplanation ? 1 : 0, pointerEvents: showFlashcardExplanation ? 'auto' : 'none' }}>
                   <strong>Explanation:</strong>
                   <FlashcardRichText text={flashcards[flashcardIndex].explanation || ""} />
                 </div>
               )}
-              <div className={styles.flipHint}>
-                {!showFlashcardExplanation && flashcards[flashcardIndex].explanation ? <><Sparkles size={14} /> Click for explanation</> : <><RotateCcw size={14} /> Flip back</>}
+              <div className={styles.flipHint} style={{ zIndex: 2 }}>
+                {flashcards[flashcardIndex].explanation && (
+                  <button
+                    className={styles.flashcardExplanationBtn}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowFlashcardExplanation(!showFlashcardExplanation);
+                    }}
+                  >
+                    <Sparkles size={14} /> {showFlashcardExplanation ? 'Hide explanation' : 'Click for explanation'}
+                  </button>
+                )}
+                <div style={{ pointerEvents: 'none', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                  <RotateCcw size={14} /> Flip back
+                </div>
               </div>
             </div>
           </div>
@@ -1043,32 +1061,34 @@ const NoteApp = () => {
 
   const getMindmapDimensions = () => {
     const svg = mindmapSvgRef.current;
-    if (!svg) return { width: 1600, height: 1000 };
+    if (!svg) return { minX: 0, minY: 0, width: 1600, height: 1000, viewBox: "0 0 1600 1000" };
     const viewBoxAttr = svg.getAttribute("viewBox");
     if (viewBoxAttr) {
       const parts = viewBoxAttr.split(" ").map(Number);
       if (parts.length === 4 && parts[2] > 0 && parts[3] > 0) {
-        return { width: parts[2], height: parts[3] };
+        return { minX: parts[0], minY: parts[1], width: parts[2], height: parts[3], viewBox: viewBoxAttr };
       }
     }
-    return { width: 1600, height: 1000 };
+    return { minX: 0, minY: 0, width: 1600, height: 1000, viewBox: "0 0 1600 1000" };
   };
 
   const serializeMindmapSvg = () => {
     const svg = mindmapSvgRef.current;
     if (!svg) throw new Error("Mind map is not ready yet.");
 
-    const { width, height } = getMindmapDimensions();
+    const { minX, minY, width, height, viewBox } = getMindmapDimensions();
     const clone = svg.cloneNode(true) as SVGSVGElement;
     clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
     clone.setAttribute("width", String(width));
     clone.setAttribute("height", String(height));
-    clone.setAttribute("viewBox", `0 0 ${width} ${height}`);
+    clone.setAttribute("viewBox", viewBox);
 
     const background = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    background.setAttribute("x", String(minX));
+    background.setAttribute("y", String(minY));
     background.setAttribute("width", String(width));
     background.setAttribute("height", String(height));
-    background.setAttribute("fill", "#fdfbf7");
+    background.setAttribute("fill", "#ffffff");
     clone.insertBefore(background, clone.firstChild);
 
     return new XMLSerializer().serializeToString(clone);
@@ -1081,17 +1101,16 @@ const NoteApp = () => {
       image.onload = () => {
         const scale = 2;
         const canvas = document.createElement("canvas");
-        canvas.width = width * scale;
-        canvas.height = height * scale;
+        canvas.width = Math.round(width * scale);
+        canvas.height = Math.round(height * scale);
         const ctx = canvas.getContext("2d");
         if (!ctx) {
           reject(new Error("Could not prepare export canvas."));
           return;
         }
-        ctx.scale(scale, scale);
-        ctx.fillStyle = "#fdfbf7";
-        ctx.fillRect(0, 0, width, height);
-        ctx.drawImage(image, 0, 0, width, height);
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
         resolve(canvas);
       };
       image.onerror = () => reject(new Error("Could not render mind map export."));
@@ -1124,16 +1143,7 @@ const NoteApp = () => {
     }
   };
 
-  const exportMindmapAsSvg = () => {
-    try {
-      downloadBlob(new Blob([serializeMindmapSvg()], { type: "image/svg+xml;charset=utf-8" }), `${noteTitle || "notejam"}-mind-map.svg`);
-    } catch (err) {
-      console.error(err);
-      alert("Could not export mind map SVG.");
-    }
-  };
-
-  const createPdfFromJpeg = (jpegBytes: Uint8Array, width = 1600, height = 1000) => {
+  const createPdfFromJpeg = (jpegBytes: Uint8Array, width = 1600, height = 1000, imgWidth = 3200, imgHeight = 2000) => {
     const parts: BlobPart[] = [];
     const offsets: number[] = [];
     let offset = 0;
@@ -1153,7 +1163,7 @@ const NoteApp = () => {
     const content = `q\n${width} 0 0 ${height} 0 0 cm\n/Im0 Do\nQ`;
     obj(4, `<< /Length ${content.length} >>\nstream\n${content}\nendstream`);
     offsets[5] = offset;
-    add(`5 0 obj\n<< /Type /XObject /Subtype /Image /Width ${width} /Height ${height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpegBytes.length} >>\nstream\n`);
+    add(`5 0 obj\n<< /Type /XObject /Subtype /Image /Width ${imgWidth} /Height ${imgHeight} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpegBytes.length} >>\nstream\n`);
     add(jpegBytes);
     add("\nendstream\nendobj\n");
 
@@ -1172,7 +1182,7 @@ const NoteApp = () => {
       const canvas = await renderMindmapToCanvas();
       const jpeg = canvas.toDataURL("image/jpeg", 0.95).split(",")[1];
       const bytes = Uint8Array.from(atob(jpeg), (char) => char.charCodeAt(0));
-      downloadBlob(createPdfFromJpeg(bytes, width, height), `${noteTitle || "notejam"}-mind-map.pdf`);
+      downloadBlob(createPdfFromJpeg(bytes, width, height, canvas.width, canvas.height), `${noteTitle || "notejam"}-mind-map.pdf`);
     } catch (err) {
       console.error(err);
       alert("Could not export mind map PDF.");
@@ -1196,11 +1206,10 @@ const NoteApp = () => {
     return (
       <div className={`${styles.mindmapInfographicShell} ${isExpanded ? styles.mindmapInfographicExpanded : ""}`}>
         <div className={styles.mindmapExportBar}>
-          <span>Vector revision sheet</span>
+          <span>Infographic Mind Map</span>
           <div>
             <button onClick={exportMindmapAsPng}><Download size={15} /> PNG</button>
             <button onClick={exportMindmapAsPdf}><Download size={15} /> PDF</button>
-            <button onClick={exportMindmapAsSvg}><Download size={15} /> SVG</button>
           </div>
         </div>
         <MindmapEngineView
@@ -1214,12 +1223,29 @@ const NoteApp = () => {
   const renderArtifactBody = (artifact: WorkspaceArtifact, isExpanded = false) => {
     if (artifact === "cheatsheet") {
       return cheatsheet.length > 0 ? (
-        <div className={styles.inlineCheatsheet}>
-          {cheatsheet.map((item, idx) => (
-            <div key={idx} className={styles.cheatsheetItem}>
-              <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{item}</ReactMarkdown>
-            </div>
-          ))}
+        <div className={`${styles.inlineCheatsheet} ${isExpanded ? styles.expandedGrid : ""}`}>
+          {cheatsheet.map((item, idx) => {
+            const colonIdx = item.indexOf(":");
+            if (colonIdx > 0 && colonIdx < 60) {
+              const title = item.slice(0, colonIdx).trim();
+              const content = item.slice(colonIdx + 1).trim();
+              return (
+                <div key={idx} className={styles.cheatsheetItem}>
+                  <div className={styles.cheatsheetTitle}>{title}</div>
+                  <div className={styles.cheatsheetContent}>
+                    <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{content}</ReactMarkdown>
+                  </div>
+                </div>
+              );
+            }
+            return (
+              <div key={idx} className={styles.cheatsheetItem}>
+                <div className={styles.cheatsheetContent}>
+                  <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{item}</ReactMarkdown>
+                </div>
+              </div>
+            );
+          })}
         </div>
       ) : (
         <div className={styles.emptyArtifactState}>
@@ -1861,12 +1887,8 @@ const NoteApp = () => {
               className={`${styles.flashcardContainer} ${isFlipped ? styles.flipped : ""}`}
               style={isFlashcardMaximized ? { flex: 1, minHeight: 0 } : {}}
               onClick={() => {
-                if (!isFlipped) {
-                  setIsFlipped(true);
-                } else if (!showFlashcardExplanation && flashcards[flashcardIndex].explanation) {
-                  setShowFlashcardExplanation(true);
-                } else {
-                  setIsFlipped(false);
+                setIsFlipped(!isFlipped);
+                if (isFlipped) {
                   setShowFlashcardExplanation(false);
                 }
               }}
@@ -1892,8 +1914,21 @@ const NoteApp = () => {
                     </div>
                   )}
 
-                  <div className={styles.flipHint}>
-                    {!showFlashcardExplanation && flashcards[flashcardIndex].explanation ? <><Sparkles size={14} /> Click for explanation</> : <><RotateCcw size={14} /> Click to flip back</>}
+                  <div className={styles.flipHint} style={{ zIndex: 2 }}>
+                    {flashcards[flashcardIndex].explanation && (
+                      <button 
+                        className={styles.flashcardExplanationBtn}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setShowFlashcardExplanation(!showFlashcardExplanation);
+                        }}
+                      >
+                        <Sparkles size={14} /> {showFlashcardExplanation ? 'Hide explanation' : 'Click for explanation'}
+                      </button>
+                    )}
+                    <div style={{ pointerEvents: 'none', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                      <RotateCcw size={14} /> Click to flip back
+                    </div>
                   </div>
                 </div>
               </div>

@@ -6,3 +6,4 @@ google-genai
 yt-dlp
 edge-tts
 imageio-ffmpeg
+PyJWT[crypto]

@@ -10,6 +10,7 @@ import {
   ImportanceTier,
   StructureType,
 } from "./types";
+import { sanitizeMathForSvg } from "./MathSanitizer";
 
 const VALID_KINDS: SectionKind[] = [
   "definition",
@@ -74,9 +75,9 @@ const normalizeImportance = (imp?: number, idx = 0): ImportanceTier => {
 
 export const extractContent = (raw: RawMindmapData): ExtractedContent => {
   const m = raw || {};
-  const title = (m.title || m.centralConcept || m.coreConcept || "Revision Map").trim();
-  const centralConcept = (m.centralConcept || m.coreConcept || m.title || "Core Concept").trim();
-  const thesis = (m.thesis || (m.takeaways && m.takeaways[0]) || "").trim();
+  const title = sanitizeMathForSvg((m.title || m.centralConcept || m.coreConcept || "Revision Map").trim());
+  const centralConcept = sanitizeMathForSvg((m.centralConcept || m.coreConcept || m.title || "Core Concept").trim());
+  const thesis = sanitizeMathForSvg((m.thesis || (m.takeaways && m.takeaways[0]) || "").trim());
 
   let rawSections: RawMindmapSection[] = Array.isArray(m.sections) ? m.sections : [];
 
@@ -117,7 +118,7 @@ export const extractContent = (raw: RawMindmapData): ExtractedContent => {
   const sections: ExtractedSection[] = rawSections
     .filter((s) => s && (s.title || (s.bullets && s.bullets.length > 0)))
     .map((s, idx) => {
-      const secTitle = (s.title || `Concept ${idx + 1}`).trim();
+      const secTitle = sanitizeMathForSvg((s.title || `Concept ${idx + 1}`).trim());
       const kind = normalizeKind(s.kind);
       const icon = normalizeIcon(s.icon, kind);
       const importance = normalizeImportance(s.importance, idx);
@@ -125,7 +126,7 @@ export const extractContent = (raw: RawMindmapData): ExtractedContent => {
 
       const rawBullets = Array.isArray(s.bullets) ? s.bullets : [];
       const bullets = rawBullets
-        .map((b) => (typeof b === "string" ? b.trim() : String(b)))
+        .map((b) => (typeof b === "string" ? sanitizeMathForSvg(b.trim()) : sanitizeMathForSvg(String(b))))
         .filter(Boolean);
 
       let compareGroup: "A" | "B" | null = null;
@@ -140,9 +141,9 @@ export const extractContent = (raw: RawMindmapData): ExtractedContent => {
         importance,
         icon,
         bullets,
-        parentTitle: s.parentTitle ? String(s.parentTitle).trim() : null,
+        parentTitle: s.parentTitle ? sanitizeMathForSvg(String(s.parentTitle).trim()) : null,
         compareGroup,
-        timeMarker: s.timeMarker ? String(s.timeMarker).trim() : null,
+        timeMarker: s.timeMarker ? sanitizeMathForSvg(String(s.timeMarker).trim()) : null,
       };
     });
 
@@ -152,14 +153,14 @@ export const extractContent = (raw: RawMindmapData): ExtractedContent => {
     m.formulas.forEach((f) => {
       if (f && typeof f === "object" && f.label) {
         formulas.push({
-          label: String(f.label).trim(),
-          detail: String(f.detail || "").trim(),
+          label: sanitizeMathForSvg(String(f.label).trim()),
+          detail: sanitizeMathForSvg(String(f.detail || "").trim()),
           relatedSection: f.relatedSection ? String(f.relatedSection).trim() : undefined,
         });
       } else if (typeof f === "string") {
         formulas.push({
           label: "Formula",
-          detail: f.trim(),
+          detail: sanitizeMathForSvg(f.trim()),
         });
       }
     });
@@ -171,14 +172,14 @@ export const extractContent = (raw: RawMindmapData): ExtractedContent => {
     m.examples.forEach((e) => {
       if (e && typeof e === "object" && e.label) {
         examples.push({
-          label: String(e.label).trim(),
-          detail: String(e.detail || "").trim(),
+          label: sanitizeMathForSvg(String(e.label).trim()),
+          detail: sanitizeMathForSvg(String(e.detail || "").trim()),
           relatedSection: e.relatedSection ? String(e.relatedSection).trim() : undefined,
         });
       } else if (typeof e === "string") {
         examples.push({
           label: "Example",
-          detail: e.trim(),
+          detail: sanitizeMathForSvg(e.trim()),
         });
       }
     });
@@ -186,12 +187,12 @@ export const extractContent = (raw: RawMindmapData): ExtractedContent => {
 
   // Extract Takeaways
   const takeaways: string[] = Array.isArray(m.takeaways)
-    ? m.takeaways.map((t) => String(t).trim()).filter(Boolean)
+    ? m.takeaways.map((t) => sanitizeMathForSvg(String(t).trim())).filter(Boolean)
     : [];
 
   // Extract Flow
   const flow: string[] = Array.isArray(m.flow)
-    ? m.flow.map((fl) => String(fl).trim()).filter(Boolean)
+    ? m.flow.map((fl) => sanitizeMathForSvg(String(fl).trim())).filter(Boolean)
     : [];
 
   // Structure Type hint
