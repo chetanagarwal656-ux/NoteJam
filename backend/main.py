@@ -495,10 +495,9 @@ def download_video_from_url(url: str) -> str:
         'retries': 10,
         'fragment_retries': 10,
         'socket_timeout': 30,
-        # iOS client talks to YouTube's mobile API endpoint which does NOT
-        # issue "Sign in to confirm you're not a bot" challenges on
-        # datacenter/server IPs.  tv_embedded is kept as secondary fallback.
-        'extractor_args': {'youtube': {'player_client': ['ios', 'tv_embedded']}},
+        # Android client currently bypasses bot detection on server IPs
+        # without requiring a PO Token (unlike ios which now requires it).
+        'extractor_args': {'youtube': {'player_client': ['android']}},
     }
 
     cookies_file = os.getenv("YTDLP_COOKIES_FILE", "").strip()
