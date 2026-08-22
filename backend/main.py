@@ -486,17 +486,19 @@ def download_video_from_url(url: str) -> str:
     from typing import Any
     video_path = os.path.join(TEMP_DIR, f"{uuid.uuid4()}.mp4")
     ydl_opts: dict[str, Any] = {
-        'format': 'worst[ext=mp4]',
+        # Prefer small MP4 to keep upload size low; fall back to any MP4,
+        # then any format yt-dlp can merge into MP4.
+        'format': 'bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[height<=480][ext=mp4]/best[ext=mp4]/best',
         'outtmpl': video_path,
         'quiet': True,
         'nocheckcertificate': True,
         'retries': 10,
         'fragment_retries': 10,
         'socket_timeout': 30,
-        # YouTube now requires JS challenge solving for stream URLs.
-        # Use node to solve ciphers and web_embedded client to avoid 403.
-        'js_runtimes': {'node': {}},
-        'extractor_args': {'youtube': {'player_client': ['web_embedded']}},
+        # iOS client talks to YouTube's mobile API endpoint which does NOT
+        # issue "Sign in to confirm you're not a bot" challenges on
+        # datacenter/server IPs.  tv_embedded is kept as secondary fallback.
+        'extractor_args': {'youtube': {'player_client': ['ios', 'tv_embedded']}},
     }
 
     cookies_file = os.getenv("YTDLP_COOKIES_FILE", "").strip()
@@ -518,6 +520,7 @@ def download_video_from_url(url: str) -> str:
             "confirm you're not a bot" in error_message
             or "http error 403" in error_message
             or "http error 429" in error_message
+            or "sign in" in error_message
         ):
             raise ValueError(
                 "YouTube blocked this download request. Add or refresh a signed-in "
