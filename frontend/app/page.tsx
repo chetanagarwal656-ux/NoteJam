@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import type { CSSProperties, MouseEvent } from "react";
 import Image from "next/image";
 import Link from "next/link";
@@ -1328,51 +1328,7 @@ function StoreDownloadPanel() {
 
 export default function LandingPage() {
   const { isSignedIn } = useAuth();
-  const introVideoRef = useRef<HTMLVideoElement | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [introReady, setIntroReady] = useState(false);
-  const [introNeedsTap, setIntroNeedsTap] = useState(false);
   const [appModalOpen, setAppModalOpen] = useState(false);
-
-  useEffect(() => {
-    const introVideo = introVideoRef.current;
-    if (!introVideo) return;
-
-    let fallbackTimer: number | undefined;
-
-    setIntroReady(false);
-    introVideo.muted = true;
-    introVideo.currentTime = 0;
-    const playPromise = introVideo.play();
-
-    if (playPromise) {
-      playPromise
-        .then(() => {
-          setIntroNeedsTap(false);
-          fallbackTimer = window.setTimeout(() => setLoading(false), 11000);
-        })
-        .catch(() => {
-          setIntroNeedsTap(true);
-        });
-    }
-
-    return () => {
-      if (fallbackTimer) window.clearTimeout(fallbackTimer);
-    };
-  }, []);
-
-  const startIntro = () => {
-    const introVideo = introVideoRef.current;
-    if (!introVideo) {
-      setLoading(false);
-      return;
-    }
-
-    setIntroNeedsTap(false);
-    setIntroReady(false);
-    introVideo.currentTime = 0;
-    introVideo.play().catch(() => setLoading(false));
-  };
 
   const handleAnchorClick = (event: MouseEvent<HTMLAnchorElement>, href: string) => {
     if (!href.startsWith("#")) return;
@@ -1404,37 +1360,6 @@ export default function LandingPage() {
 
   return (
     <main className={styles.page}>
-      <AnimatePresence>
-        {loading && (
-          <motion.div
-            className={styles.loader}
-            initial={{ opacity: 1 }}
-            exit={{ opacity: 0, scale: 0.985 }}
-            transition={{ duration: 0.7, ease: "easeInOut" }}
-          >
-            <video
-              ref={introVideoRef}
-              className={`${styles.loaderVideo} ${introReady ? styles.loaderVideoReady : ""}`}
-              src="/videos/notejam-intro.mp4"
-              poster="/brand/notejam-intro-poster.jpg"
-              autoPlay
-              muted
-              playsInline
-              preload="auto"
-              onLoadedMetadata={() => setIntroReady(true)}
-              onLoadedData={() => setIntroReady(true)}
-              onCanPlay={() => setIntroReady(true)}
-              onEnded={() => setLoading(false)}
-            />
-            {introNeedsTap && (
-              <button className={styles.loaderStartButton} onClick={startIntro}>
-                Start intro
-              </button>
-            )}
-          </motion.div>
-        )}
-      </AnimatePresence>
-
       <div className={styles.ambientBackdrop} aria-hidden="true">
         <video
           className={styles.ambientBackdropVideo}
@@ -1451,7 +1376,7 @@ export default function LandingPage() {
       <motion.div
         className={styles.siteFrame}
         initial={{ opacity: 0, y: 18 }}
-        animate={{ opacity: loading ? 0 : 1, y: loading ? 18 : 0 }}
+        animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.75, delay: 0.1 }}
       >
         <header className={styles.navbar}>
@@ -1495,7 +1420,7 @@ export default function LandingPage() {
           <motion.div
             className={styles.heroCopy}
             initial={{ opacity: 0, y: 28 }}
-            animate={{ opacity: loading ? 0 : 1, y: loading ? 28 : 0 }}
+            animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.8, delay: 0.35 }}
           >
             <div className={styles.eyebrow}>
@@ -1521,7 +1446,7 @@ export default function LandingPage() {
           <motion.div
             className={styles.heroVisual}
             initial={{ opacity: 0, scale: 0.96, y: 35 }}
-            animate={{ opacity: loading ? 0 : 1, scale: loading ? 0.96 : 1, y: loading ? 35 : 0 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
             transition={{ duration: 0.9, delay: 0.5, ease: "easeOut" }}
           >
             <ProductCollage />
