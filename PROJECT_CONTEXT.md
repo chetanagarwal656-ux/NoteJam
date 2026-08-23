@@ -20,9 +20,9 @@
 
 ## 3. Core Features
 1. **Lecture Ingestion & Async Processing**:
-   - Accepts YouTube/web URLs (downloaded via `yt-dlp`) or direct video uploads (MP4/WebM/etc.).
+   - Accepts YouTube URLs (processed directly via Google Gemini `Part.from_uri()`) or direct video uploads (MP4/WebM/etc.).
    - Background worker thread with pollable job status (`/process` -> `/process/{job_id}`).
-   - Automatic 25-minute chunking with dynamic fallback to audio-only processing if visual context token limits are exceeded.
+   
 2. **Interactive Markdown Notes**:
    - Structured with headings (`#`, `##`, `###`), bold keywords, italic definitions, and blockquote takeaways.
    - Exact clickable timestamps `[MM:SS]` that seek the synced in-browser video player.
@@ -55,8 +55,8 @@
 ### Backend
 - **Framework**: FastAPI (Python 3.10+) with `uvicorn[standard]`
 - **AI / LLM SDK**: `google-genai` (official Google GenAI SDK, Client instantiated with `timeout: 3600000`)
-- **Video / Audio Ingestion**: `yt-dlp` (YouTube / web media downloader)
-- **Media Processing**: `imageio-ffmpeg` (bundled FFmpeg binary for frame capture, chunk splitting, duration detection, audio extraction)
+- **Video / Audio Ingestion**: Direct to Google Gemini (via URI or File Upload)
+- **Media Processing**: System `ffmpeg` (for silence generation only)
 - **Text-to-Speech (TTS)**: `edge-tts` (Microsoft Edge Neural TTS: `hi-IN-MadhurNeural`, `hi-IN-SwaraNeural`, `en-IN-PrabhatNeural`, `en-IN-NeerjaNeural`)
 - **Database**: SQLite3 (single local file `notejam.db`) with raw SQL queries and JSON serialization
 - **Config**: `python-dotenv`
@@ -87,7 +87,7 @@ Note_Jam/
 │   ├── notejam.db                 # SQLite database file
 │   ├── requirements.txt           # Python dependencies
 │   ├── static/                    # Generated frame JPGs and podcast MP3s served at /static
-│   ├── temp/                      # Temporary downloaded videos, audio files, and video chunks
+│   ├── temp/                      # Temporary storage for direct file uploads
 │   └── venv/                      # Python virtual environment
 ├── frontend/
 │   ├── .env.example               # Template frontend env vars
@@ -146,7 +146,7 @@ Note_Jam/
                      ┌─────────────────┴────┐   ┌─────┴──────────┐   ┌┴────────────────────┐
                      ▼                      ▼   ▼                ▼   ▼                     ▼
               Google GenAI SDK               FFmpeg Binary           Edge-TTS           yt-dlp
-             (gemini-2.5-flash)           (imageio-ffmpeg)        (Neural Audio)    (Video Downloader)
+             (gemini-2.5-flash)           (system ffmpeg)         (Neural Audio)    (Gemini URI Fetch)
              - Structured Notes           - Frame Extraction      - Hindi/English   - YouTube / Web
              - Mind Map Schema            - 25m Video Chunking      Dual Hosts        Extraction
              - Spaced Flashcards          - Audio Track Demux       Chetan/Anamika
@@ -159,10 +159,10 @@ Note_Jam/
 ## 7. Data Flow
 1. **Note Generation**:
    - User inputs URL or file -> `POST /process` creates `job_id` and spawns daemon `threading.Thread`.
-   - Worker downloads video (if URL) to `backend/temp/` via `yt-dlp` (`worst[ext=mp4]`).
+   - Worker passes YouTube URLs directly to Gemini via `Part.from_uri()` or uploads local files directly to Gemini via `client.files.upload()`.
    - File is uploaded to Google Gemini File API.
    - Gemini generates comprehensive Markdown with `[EXTRACT_FRAME_AT_MM:SS]` tags and a trailing Mermaid diagram.
-   - If visual processing exceeds token limit (`TokenLimitExceeded`), backend automatically slices video into 25-minute compressed chunks via FFmpeg (`split_video_into_chunks`), generates chunk notes, extracts audio fallback if needed, and merges via Gemini (`merge_chunk_notes`).
+   - Uses Gemini's large context window to process the full video directly. Employs LaTeX and Mermaid constraints via unified `SYSTEM_PROMPT` to natively recreate all video charts, drawings, and formulas without extracting screenshot image files.
    - For every `[EXTRACT_FRAME_AT_MM:SS]`, FFmpeg extracts high-quality JPG to `backend/static/` and replaces tag with markdown image link.
    - Client polls `GET /process/{job_id}` until `status == "complete"`.
 2. **Artifact Generation (On-Demand)**:
@@ -184,7 +184,7 @@ Note_Jam/
 ### Backend (`backend/main.py`)
 - `init_db()`: Initializes table and ensures schema migrations (`ai_podcast_url`, `ai_debate_url`).
 - `robust_gemini_call(contents, model='gemini-2.5-flash', is_json=False)`: Wraps Gemini calls with 3 retries, handles 429/503 rate limits with a 65-second sleep, and intercepts token limit errors.
-- `split_video_into_chunks(video_path, chunk_seconds=1500)`: Uses FFmpeg with `libx264`, `-crf 35`, and `scale='min(854,iw)':-2` to produce lightweight 25-minute video chunks.
+- `process_youtube_url_directly(url)`: Bypasses server-side downloads entirely, handing YouTube links straight to Google.
 - `extract_frame(video_path, timestamp_str, output_filename)`: Runs FFmpeg seek `-ss` to extract a single frame `-vframes 1` at high quality `-q:v 2`.
 - `parse_json_response(raw_text)`: Cleans markdown backticks (` ```json `) and extracts outermost balanced JSON object or array.
 - `run_process_job(...)`: Background worker executing ingestion pipeline and updating in-memory `PROCESS_JOBS` dictionary.
@@ -293,7 +293,7 @@ Note_Jam/
 ## 13. Naming Conventions
 - **TypeScript**: `PascalCase` for components/types (`MindmapEngineView`, `SavedNote`), `camelCase` for variables, functions, and properties (`currentNoteId`, `fetchNotes`).
 - **CSS**: `camelCase` for module classes (`.artifactConsole`, `.liveBackgroundContainer`), kebab-case for CSS variables (`--bg`, `--font-kalam`).
-- **Python**: `snake_case` for functions, variables, and route helpers (`robust_gemini_call`, `split_video_into_chunks`), `PascalCase` for Pydantic models and exceptions (`NoteData`, `TokenLimitExceeded`).
+- **Python**: `snake_case` for functions, variables, and route helpers (`robust_gemini_call`, `process_youtube_url_directly`), `PascalCase` for Pydantic models and exceptions (`NoteData`, `TokenLimitExceeded`).
 - **Database**: `snake_case` for column names (`ai_podcast_url`, `created_at`, `video_url`).
 
 ---
@@ -380,14 +380,14 @@ npm run dev
 ## 20. Security Considerations
 - **CORS Configuration**: Controlled via `ALLOWED_ORIGINS` in FastAPI CORS middleware.
 - **Path Traversal Protection**: Static and audio file retrievers use `os.path.basename()` on requested filenames.
-- **YouTube Downloader Safety**: `yt-dlp` runs with sanitized output templates in `backend/temp/` and timeouts.
+
 - **Database Queries**: Parameterized queries (`?` placeholder) are strictly used to eliminate SQL injection vulnerabilities.
 
 ---
 
 ## 21. Performance Considerations
-- **Video Slicing**: FFmpeg encodes chunked videos using `veryfast` preset, `-crf 35`, and downscales to max width 854px to drastically reduce payload sizes and Gemini processing time.
-- **Temporary File Purging**: All downloaded videos, sliced chunks, and intermediate audio tracks in `backend/temp/` are deleted in `finally:` blocks.
+
+- **Temporary File Purging**: User uploaded files in `backend/temp/` are cleaned up locally and from Gemini's File API in `finally:` blocks.
 - **In-Memory Job Garbage Collection**: `PROCESS_JOBS` cleans up old completed/failed jobs when dictionary exceeds `MAX_PROCESS_JOBS` (200).
 - **Client Cache**: LocalStorage snapshot prevents redundant re-fetches when navigating between pages.
 
@@ -397,13 +397,12 @@ npm run dev
 1. **Google Gemini API** (`gemini-2.5-flash`): Core LLM for multimodal lecture analysis, frame timestamp targeting, flashcards, mind maps, and note grounded Q&A.
 2. **Microsoft Edge Neural TTS (`edge-tts`)**: Dual-speaker neural audio generation for Indian English and Hindi.
 3. **Clerk Auth**: Authentication and user management.
-4. **YouTube (`yt-dlp`)**: Remote video stream extraction.
+4. **YouTube Integration**: Direct extraction through Gemini APIs.
 
 ---
 
 ## 23. Important Dependencies
 - `google-genai`: Official next-gen Gemini Python SDK
-- `imageio-ffmpeg`: Zero-config standalone FFmpeg executable wrapper
 - `edge-tts`: Asynchronous Python interface to Edge TTS services
 - `@clerk/nextjs`: Auth provider for Next.js App Router
 - `framer-motion`: Declarative React animations
@@ -425,7 +424,7 @@ npm run dev
 2. **Do NOT change the Mindmap ViewBox without adjusting calculations**: The mind map engine is calibrated for a `1600x1000` SVG canvas (`LayoutPlanner.ts` and `SketchRenderer.tsx`).
 3. **Do NOT execute raw SQL without stringifying JSON**: SQLite columns `cheatsheet`, `mindmap`, and `flashcards` must receive `json.dumps(...)`.
 4. **Do NOT omit `is_json=True` in `robust_gemini_call` when expecting structured JSON**: Without `response_mime_type="application/json"`, Gemini may wrap responses in explanatory text.
-5. **Do NOT forget FFmpeg cleanup**: Always use `try...finally` to ensure temp chunks are deleted.
+5. **Do NOT forget Gemini cleanup**: Always use `try...finally` to ensure uploaded user files are deleted from Gemini's API.
 
 ---
 

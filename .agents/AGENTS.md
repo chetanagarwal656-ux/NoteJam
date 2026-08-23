@@ -7,7 +7,7 @@ Refer to the complete, dense project context in [PROJECT_CONTEXT.md](file:///c:/
 ## Critical Architectural Guidelines & Rules for NoteJam
 
 1. **Technology Stack**:
-   - **Backend**: FastAPI (`backend/main.py`), Python 3.10+, `google-genai` (gemini-2.5-flash), `edge-tts`, `imageio-ffmpeg`, `yt-dlp`, SQLite (`backend/notejam.db`).
+   - **Backend**: FastAPI (`backend/main.py`), Python 3.10+, `google-genai` (gemini-2.5-flash), `edge-tts`, SQLite (`backend/notejam.db`).
    - **Frontend**: Next.js 16 (App Router), React 19, TypeScript 5, Vanilla CSS Modules (`page.module.css`, `landing.module.css`), `framer-motion`, `lucide-react`, `rehype-katex`, `remark-math`, `mermaid`, Clerk Auth.
    - **No TailwindCSS**: Never add or use Tailwind CSS classes; use CSS modules and variables in `globals.css`.
 
@@ -18,7 +18,7 @@ Refer to the complete, dense project context in [PROJECT_CONTEXT.md](file:///c:/
 
 3. **Gemini & AI Processing Rules**:
    - Trailing Mermaid diagram in markdown must strictly follow `graph TD` and never include brackets `[]`, parentheses `()`, or quotes `"` in visible node labels.
-   - Video processing uses 25-minute chunking with automatic audio-only fallback on token limit exceeded.
+   - Video processing uses `Part.from_uri()` for direct YouTube processing natively via Gemini infrastructure, eliminating server-side downloads or chunking.
    - Use `parse_json_response()` on all structured outputs.
    - Grounded Q&A must strictly answer from note markdown.
 

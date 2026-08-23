@@ -2,7 +2,7 @@
 
 import { useCallback, useState, useEffect, useRef } from "react";
 import ReactPlayer from "react-player";
-import { Upload, Link as LinkIcon, Sparkles, Download, Loader2, Home, Clock, BookOpen, Layers, BrainCircuit, FileSignature, X, ChevronLeft, ChevronRight, RotateCcw, MessageCircle, Send, Save, Trash2, PenTool, ImageOff, Moon, Sun, Maximize2, Minimize2, Volume2, Play, Pause, FastForward, Rewind, PanelRightClose } from "lucide-react";
+import { Upload, Link as LinkIcon, Sparkles, Download, Loader2, Home, Clock, BookOpen, Layers, BrainCircuit, FileSignature, X, ChevronLeft, ChevronRight, RotateCcw, MessageCircle, Send, Save, Trash2, PenTool, Moon, Sun, Maximize2, Minimize2, Volume2, Play, Pause, FastForward, Rewind, PanelRightClose } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import mermaid from "mermaid";
 import remarkMath from "remark-math";
@@ -87,7 +87,6 @@ type WorkspaceSnapshot = {
   activeArtifact: WorkspaceArtifact | null;
   isArtifactConsoleOpen: boolean;
   isHandwritten: boolean;
-  hideScreenshots: boolean;
   noteTheme: "dark" | "light";
 };
 
@@ -319,7 +318,7 @@ const NoteApp = () => {
   const [currentNoteId, setCurrentNoteId] = useState<string | null>(null);
   const [noteTitle, setNoteTitle] = useState("");
   const [isHandwritten, setIsHandwritten] = useState(false);
-  const [hideScreenshots, setHideScreenshots] = useState(false);
+
   const [noteTheme, setNoteTheme] = useState<"dark" | "light">("dark");
   const [isArtifactConsoleOpen, setIsArtifactConsoleOpen] = useState(true);
   const [activeArtifact, setActiveArtifact] = useState<WorkspaceArtifact | null>(null);
@@ -466,7 +465,6 @@ const NoteApp = () => {
         setActiveArtifact(snapshot.activeArtifact ?? null);
         setIsArtifactConsoleOpen(snapshot.isArtifactConsoleOpen ?? true);
         setIsHandwritten(snapshot.isHandwritten || false);
-        setHideScreenshots(snapshot.hideScreenshots || false);
         setNoteTheme(snapshot.noteTheme || "dark");
 
         if (snapshot.currentNoteId && !snapshot.markdown) {
@@ -517,7 +515,6 @@ const NoteApp = () => {
       activeArtifact,
       isArtifactConsoleOpen,
       isHandwritten,
-      hideScreenshots,
       noteTheme
     };
     window.localStorage.setItem(WORKSPACE_STORAGE_KEY, JSON.stringify(snapshot));
@@ -535,7 +532,6 @@ const NoteApp = () => {
     activeArtifact,
     isArtifactConsoleOpen,
     isHandwritten,
-    hideScreenshots,
     noteTheme
   ]);
 
@@ -1471,9 +1467,6 @@ const NoteApp = () => {
               <button className={`${styles.formatToggle} ${isHandwritten ? styles.formatToggleActive : ""}`} onClick={() => setIsHandwritten(!isHandwritten)}>
                 <PenTool size={16} /> Handwritten
               </button>
-              <button className={`${styles.formatToggle} ${hideScreenshots ? styles.formatToggleActive : ""}`} onClick={() => setHideScreenshots(!hideScreenshots)}>
-                <ImageOff size={16} /> {hideScreenshots ? "Images hidden" : "Images visible"}
-              </button>
               <button className={styles.formatToggle} onClick={() => setNoteTheme(noteTheme === 'dark' ? 'light' : 'dark')}>
                 {noteTheme === 'dark' ? <Sun size={16} /> : <Moon size={16} />} {noteTheme === 'dark' ? "Dark notes" : "Light notes"}
               </button>
@@ -1673,7 +1666,7 @@ const NoteApp = () => {
                     {saveMessage && <span>{saveMessage}</span>}
                   </div>
                 )}
-                <div className={`${styles.markdown} ${noteTheme === 'light' ? styles.markdownLight : ''} ${isHandwritten ? styles.handwritten : ''} ${hideScreenshots ? styles.hideImages : ''}`} onMouseUp={handleMouseUp}>
+                <div className={`${styles.markdown} ${noteTheme === 'light' ? styles.markdownLight : ''} ${isHandwritten ? styles.handwritten : ''}`} onMouseUp={handleMouseUp}>
                   <ReactMarkdown 
                     remarkPlugins={[remarkMath]} 
                     rehypePlugins={[rehypeKatex]}

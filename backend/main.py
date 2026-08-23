@@ -11,7 +11,6 @@ import threading
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from google import genai
-import yt_dlp
 from dotenv import load_dotenv
 import sqlite3
 from datetime import datetime
@@ -108,8 +107,6 @@ def get_current_user_id(authorization: str = Header(None)) -> str:
     except Exception:
         raise HTTPException(status_code=401, detail="Authentication failed")
 
-import subprocess
-
 def get_silence_bytes(duration_ms: int) -> bytes:
     filepath = os.path.join(STATIC_DIR, f"silence_{duration_ms}.mp3")
     if not os.path.exists(filepath):
@@ -127,7 +124,7 @@ SILENCE_SENTENCE_END = get_silence_bytes(350)
 SILENCE_SPEAKER_TURN = get_silence_bytes(550)
 SILENCE_EXCLAMATION = get_silence_bytes(250)
 
-client = genai.Client(http_options={'timeout': 3600000}) 
+client = genai.Client(http_options={'timeout': 3600000})
 
 def get_public_base_url() -> str:
     return os.getenv("PUBLIC_BASE_URL", "http://localhost:8000").rstrip("/")
@@ -159,7 +156,7 @@ def parse_json_response(raw_text: str):
 
 SYSTEM_PROMPT = """
 You are Note Jam, an elite AI teaching assistant.
-You will receive a video file representing a lecture or tutorial.
+You will receive a lecture or tutorial video.
 Your task is to convert this video into a beautifully structured, comprehensive, and highly readable set of Markdown notes.
 
 Do not output a raw transcript. Analyze the video, extract the core concepts, and structure them logically.
@@ -168,67 +165,15 @@ CRITICAL INSTRUCTIONS FOR THE "markdown" FIELD:
 - FORMATTING: Use **Bold** for keywords, *Italics* for definitions, and blockquotes for takeaways. Structure perfectly with #, ##, ###.
 - MIND MAP: The VERY LAST thing in the markdown string MUST be a Mermaid.js diagram (wrapped in ```mermaid blocks) visualizing the hierarchy and connections of the core concepts taught in the lecture. It MUST be placed at the end of the document.
   * CRITICAL MERMAID RULES: Use `graph TD`. You MUST NOT use parentheses `()`, brackets `[]`, braces `{{}}`, or quotes `"` inside the visible node text. Keep node names extremely simple and alphanumeric only! (Example: `A[Control Systems] --> B[PID Controllers]`). Failure to follow this will break the renderer.
-- VISUALS: If a frame contains a diagram, graph, mathematical equation, or chemical structure, but the professor is physically blocking it or it is blurry, YOU MUST recreate it yourself using highly detailed Markdown Tables, LaTeX matrices, or structured text.
+- VISUALS: You cannot output images. If the video contains important diagrams, graphs, flowcharts, tables, mathematical equations, chemical structures, circuit diagrams, or anything drawn on a whiteboard or slide, YOU MUST meticulously recreate them using Mermaid.js diagrams, highly detailed Markdown Tables, LaTeX matrices, or structured text. Do NOT skip any visual content — recreate everything the teacher writes or draws.
 - MATH: Use LaTeX strictly. Inline: `$E = mc^2$`. Block: `$$...$$`.
 - VIDEO SYNC: Heavily inject exact timestamp tags `[MM:SS]` throughout the text whenever you explain a new concept, so the user can click them to sync the video.
-- FRAME EXTRACTION: YOU MUST extract at least 2 frames! When the teacher writes an important formula or draws a diagram, exactly insert: [EXTRACT_FRAME_AT_MM:SS] (e.g. [EXTRACT_FRAME_AT_01:23]). Do NOT skip this step!
-
-LANGUAGE:
-Translate and write BOTH the markdown notes and the `<cheatsheet>` entirely in the requested language: {language}.
-Ensure the notes read like a premium study guide!
-"""
-
-AUDIO_SYSTEM_PROMPT = """
-You are Note Jam, an elite AI teaching assistant.
-You will receive the audio track of a lecture or tutorial.
-Your task is to convert this lecture audio into beautifully structured, comprehensive, and highly readable Markdown notes.
-
-The original video was too long to process visually, so focus on everything clearly taught or explained by the professor.
-Do not hallucinate diagrams or board content that is not present in the audio.
-
-CRITICAL INSTRUCTIONS:
-- Do not output a raw transcript. Analyze the lecture and structure the concepts logically.
-- Preserve all important definitions, examples, steps, formulas, comparisons, and professor explanations.
-- Use **Bold** for keywords, *Italics* for definitions, and blockquotes for takeaways.
-- Use #, ##, and ### headings to make the notes easy to revise.
-- Use LaTeX for math. Inline: `$E = mc^2$`. Block: `$$...$$`.
-- Add timestamp tags `[MM:SS]` when a new concept begins if timing can be inferred.
-- The VERY LAST thing in the markdown string MUST be a Mermaid.js diagram wrapped in ```mermaid blocks.
-- For Mermaid, use `graph TD` and keep visible node text simple and alphanumeric.
 
 LANGUAGE:
 Translate and write the markdown notes entirely in the requested language: {language}.
 Ensure the notes read like a premium study guide!
 """
 
-MERGE_CHUNK_NOTES_PROMPT = """
-You are Note Jam, an elite AI teaching assistant.
-You will receive notes generated from consecutive 25-minute video chunks of the same lecture.
-
-Your task is to merge them into one polished, coherent, premium study guide.
-
-CRITICAL INSTRUCTIONS:
-- Preserve lecture-grounded details from every chunk.
-- Remove duplicated explanations caused by chunk boundaries.
-- Keep the original learning order of the lecture.
-- Keep important timestamps when available.
-- Keep image markdown links when they appear in the chunk notes.
-- Do not invent content that is not present in the chunk notes.
-- Use #, ##, and ### headings.
-- Use **Bold** for key terms, *Italics* for definitions, blockquotes for takeaways, and LaTeX for formulas.
-- The VERY LAST thing in the markdown string MUST be a Mermaid.js diagram wrapped in ```mermaid blocks.
-- For Mermaid, use `graph TD` and keep visible node text simple and alphanumeric.
-
-LANGUAGE:
-Write the final notes entirely in the requested language: {language}.
-
-Chunk notes:
-{chunk_notes}
-"""
-
-import imageio_ffmpeg
-
-CHUNK_SECONDS = 25 * 60
 MAX_PROCESS_JOBS = 200
 PROCESS_JOBS: dict[str, dict] = {}
 PROCESS_JOBS_LOCK = threading.Lock()
@@ -262,24 +207,6 @@ def is_token_limit_error(error: Exception) -> bool:
         or ("invalid_argument" in err_str and "token" in err_str)
     )
 
-def extract_frame(video_path: str, timestamp_str: str, output_filename: str):
-    output_path = os.path.join(STATIC_DIR, output_filename)
-    ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
-    command = [
-        ffmpeg_exe,
-        "-ss", timestamp_str,
-        "-i", video_path,
-        "-vframes", "1",
-        "-q:v", "2",
-        output_path,
-        "-y"
-    ]
-    try:
-        subprocess.run(command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        return f"{get_public_base_url()}/static/{output_filename}"
-    except subprocess.CalledProcessError as e:
-        print(f"Error extracting frame at {timestamp_str}: {e.stderr.decode()}")
-        return None
 def robust_gemini_call(contents, model='gemini-2.5-flash', is_json=False):
     max_retries = 3
     for attempt in range(max_retries):
@@ -295,7 +222,7 @@ def robust_gemini_call(contents, model='gemini-2.5-flash', is_json=False):
             err_str = str(e).lower()
             if is_token_limit_error(e):
                 raise TokenLimitExceeded(
-                    "This lecture is too long for visual processing. Retrying with an audio-only study-notes mode."
+                    "This lecture is too long to process. Please try a shorter lecture segment."
                 ) from e
             if "429" in err_str or "503" in err_str or "quota" in err_str:
                 if attempt < max_retries - 1:
@@ -307,117 +234,21 @@ def robust_gemini_call(contents, model='gemini-2.5-flash', is_json=False):
                 raise e
     raise Exception("Failed to generate content after retries.")
 
-def extract_audio_track(video_path: str) -> str:
-    audio_path = os.path.join(TEMP_DIR, f"audio_{uuid.uuid4().hex[:8]}.mp3")
-    ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
-    command = [
-        ffmpeg_exe,
-        "-i", video_path,
-        "-vn",
-        "-ac", "1",
-        "-ar", "16000",
-        "-b:a", "48k",
-        audio_path,
-        "-y"
-    ]
-    subprocess.run(command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    return audio_path
-
-def get_media_duration_seconds(media_path: str) -> float:
-    ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
-    command = [ffmpeg_exe, "-i", media_path]
-    result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    output = result.stderr.decode(errors="ignore")
-    match = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", output)
-    if not match:
-        raise ValueError("Could not determine video duration for chunking.")
-    hours, minutes, seconds = match.groups()
-    return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
-
-def split_video_into_chunks(video_path: str, chunk_seconds: int = CHUNK_SECONDS) -> list[str]:
-    duration = get_media_duration_seconds(video_path)
-    chunk_paths: list[str] = []
-    ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
-    total_chunks = max(1, int((duration + chunk_seconds - 1) // chunk_seconds))
-
-    for index in range(total_chunks):
-        start = index * chunk_seconds
-        chunk_path = os.path.join(TEMP_DIR, f"chunk_{uuid.uuid4().hex[:8]}_{index + 1}.mp4")
-        command = [
-            ffmpeg_exe,
-            "-ss", str(start),
-            "-t", str(chunk_seconds),
-            "-i", video_path,
-            "-vf", "scale='min(854,iw)':-2",
-            "-c:v", "libx264",
-            "-preset", "veryfast",
-            "-crf", "35",
-            "-c:a", "aac",
-            "-b:a", "64k",
-            "-movflags", "+faststart",
-            chunk_path,
-            "-y"
-        ]
-        try:
-            subprocess.run(command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        except subprocess.CalledProcessError:
-            fallback_command = [
-                ffmpeg_exe,
-                "-ss", str(start),
-                "-t", str(chunk_seconds),
-                "-i", video_path,
-                "-c", "copy",
-                chunk_path,
-                "-y"
-            ]
-            subprocess.run(fallback_command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        chunk_paths.append(chunk_path)
-
-    return chunk_paths
-
-def merge_chunk_notes(chunk_notes: list[str], language: str) -> str:
-    combined_notes = "\n\n---\n\n".join(chunk_notes)
-    return robust_gemini_call(
-        contents=[MERGE_CHUNK_NOTES_PROMPT.format(language=language, chunk_notes=combined_notes)],
+def process_youtube_url_directly(url: str, language: str = "English") -> dict:
+    """Process a YouTube URL by passing it directly to Gemini via Part.from_uri().
+    Google's infrastructure fetches the video natively — no server-side download needed."""
+    print(f"Processing YouTube URL directly via Gemini: {url}")
+    markdown_output = robust_gemini_call(
+        contents=[
+            genai.types.Part.from_uri(file_uri=url, mime_type="video/mp4"),
+            SYSTEM_PROMPT.format(language=language)
+        ],
         is_json=False
     )
+    return {"markdown": markdown_output}
 
-def process_chunked_video_and_generate_notes(video_path: str, language: str = "English") -> dict:
-    print("Processing video in 25-minute chunks.")
-    chunk_paths: list[str] = []
-    audio_paths: list[str] = []
-    try:
-        chunk_paths = split_video_into_chunks(video_path)
-        chunk_notes: list[str] = []
-
-        for index, chunk_path in enumerate(chunk_paths):
-            start_minute = index * 25
-            end_minute = start_minute + 25
-            chunk_label = f"Lecture chunk {index + 1} approximately {start_minute:02d}:00 to {end_minute:02d}:00"
-            try:
-                result = process_media_and_generate_notes(chunk_path, language, visual_mode=True)
-            except TokenLimitExceeded:
-                print(f"{chunk_label} exceeded visual token limit. Retrying this chunk as compressed audio.")
-                audio_path = extract_audio_track(chunk_path)
-                audio_paths.append(audio_path)
-                result = process_media_and_generate_notes(audio_path, language, visual_mode=False)
-
-            chunk_notes.append(f"## {chunk_label}\n\n{result['markdown']}")
-
-        merged_notes = merge_chunk_notes(chunk_notes, language)
-        return {
-            "markdown": (
-                "> NoteJam processed this lecture in 25-minute video chunks because the full video exceeded the AI visual context limit. "
-                "Each chunk was analyzed separately and then merged into one revision-ready note.\n\n"
-                + merged_notes
-            )
-        }
-    finally:
-        for path in [*chunk_paths, *audio_paths]:
-            if path and os.path.exists(path):
-                os.remove(path)
-
-def process_media_and_generate_notes(media_path: str, language: str = "English", visual_mode: bool = True) -> dict:
+def process_uploaded_file_and_generate_notes(media_path: str, language: str = "English") -> dict:
+    """Process an uploaded video/audio file by uploading it to the Gemini File API."""
     print("Uploading media to Gemini...")
     uploaded_file = None
     try:
@@ -436,31 +267,12 @@ def process_media_and_generate_notes(media_path: str, language: str = "English",
             raise ValueError("File processing in Gemini failed.")
 
         print("Generating notes...")
-        prompt = SYSTEM_PROMPT if visual_mode else AUDIO_SYSTEM_PROMPT
         markdown_output = robust_gemini_call(
-            contents=[uploaded_file, prompt.format(language=language)],
+            contents=[uploaded_file, SYSTEM_PROMPT.format(language=language)],
             is_json=False
         )
 
-        final_markdown = markdown_output
-
-        if visual_mode:
-            # Parse for [EXTRACT_FRAME_AT_MM:SS]
-            pattern = r'\[EXTRACT_FRAME_AT_(\d{1,2}:\d{2}(?::\d{2})?)\]'
-            matches = re.finditer(pattern, markdown_output)
-
-            for match in matches:
-                timestamp = match.group(1)
-                full_tag = match.group(0)
-
-                frame_filename = f"frame_{uuid.uuid4().hex[:8]}.jpg"
-                image_url = extract_frame(media_path, timestamp, frame_filename)
-
-                if image_url:
-                    image_markdown = f"![Diagram at {timestamp}]({image_url})"
-                    final_markdown = final_markdown.replace(full_tag, image_markdown)
-        
-        return {"markdown": final_markdown}
+        return {"markdown": markdown_output}
     finally:
         if uploaded_file and uploaded_file.name:
             try:
@@ -468,86 +280,22 @@ def process_media_and_generate_notes(media_path: str, language: str = "English",
             except Exception as e:
                 print(f"Failed to delete file from Gemini: {e}")
 
-def process_video_and_generate_notes(video_path: str, language: str = "English") -> dict:
-    try:
-        return process_media_and_generate_notes(video_path, language, visual_mode=True)
-    except TokenLimitExceeded:
-        print("Video exceeded Gemini token limit. Falling back to 25-minute chunked video processing.")
-        try:
-            return process_chunked_video_and_generate_notes(video_path, language)
-        except TokenLimitExceeded as e:
-            raise HTTPException(
-                status_code=413,
-                detail="This lecture is too dense to process even in 25-minute chunks. Please try a shorter lecture segment or upload a trimmed part of the video."
-            ) from e
-
-
-def download_video_from_url(url: str) -> str:
-    from typing import Any
-    video_path = os.path.join(TEMP_DIR, f"{uuid.uuid4()}.mp4")
-    ydl_opts: dict[str, Any] = {
-        # Prefer small MP4 to keep upload size low; fall back to any MP4,
-        # then any format yt-dlp can merge into MP4.
-        'format': 'bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[height<=480][ext=mp4]/best[ext=mp4]/best',
-        'outtmpl': video_path,
-        'quiet': True,
-        'nocheckcertificate': True,
-        'retries': 10,
-        'fragment_retries': 10,
-        'socket_timeout': 30,
-        # Android client currently bypasses bot detection on server IPs
-        # without requiring a PO Token (unlike ios which now requires it).
-        'extractor_args': {'youtube': {'player_client': ['android']}},
-    }
-
-    cookies_file = os.getenv("YTDLP_COOKIES_FILE", "").strip()
-    if cookies_file:
-        if not os.path.isabs(cookies_file):
-            cookies_file = os.path.join(BASE_DIR, cookies_file)
-        if os.path.isfile(cookies_file):
-            ydl_opts['cookiefile'] = cookies_file
-
-    print(f"Downloading from URL: {url}")
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
-    except Exception as error:
-        if os.path.exists(video_path):
-            os.remove(video_path)
-        error_message = str(error).lower()
-        if (
-            "confirm you're not a bot" in error_message
-            or "http error 403" in error_message
-            or "http error 429" in error_message
-            or "sign in" in error_message
-        ):
-            raise ValueError(
-                "YouTube blocked this download request. Add or refresh a signed-in "
-                "YouTube cookies file using YTDLP_COOKIES_FILE in backend/.env, then retry."
-            ) from error
-        raise
-    return video_path
-
 def run_process_job(job_id: str, language: str, url: Optional[str] = None, video_path: str = ""):
     try:
-        update_process_job(job_id, status="working", message="Downloading and preparing your lecture...")
         if url:
-            video_path = download_video_from_url(url)
+            update_process_job(job_id, status="working", message="Connecting directly to YouTube via Google Gemini...")
+            result = process_youtube_url_directly(url, language)
+        elif video_path and os.path.exists(video_path):
+            update_process_job(job_id, status="working", message="Uploading and analyzing your lecture video...")
+            result = process_uploaded_file_and_generate_notes(video_path, language)
+        else:
+            raise ValueError("No valid video URL or file provided.")
 
-        if not video_path or not os.path.exists(video_path):
-            raise ValueError("Failed to acquire video.")
-
-        update_process_job(job_id, status="working", message="Analyzing lecture audio, visuals, timestamps, and board content...")
-        result = process_video_and_generate_notes(video_path, language)
         update_process_job(job_id, status="complete", message="Notes ready", result=result)
-    except HTTPException as e:
-        update_process_job(job_id, status="failed", message=e.detail)
     except Exception as e:
         print(f"Error processing video job {job_id}: {e}")
         if is_token_limit_error(e):
-            message = "This lecture is too dense to process even in 25-minute chunks. Please try a shorter lecture segment."
-        elif str(e).startswith("YouTube blocked this download request") or str(e).startswith("YTDLP_COOKIES_FILE"):
-            message = str(e)
+            message = "This lecture is too long to process. Please try a shorter lecture segment."
         elif "Google Gemini API rate limit or quota limit" in str(e):
             message = str(e)
         else:
