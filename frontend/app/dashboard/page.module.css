@@ -3788,3 +3788,15 @@
     max-height: none;
   }
 }
+
+/* FORCE OVERRIDE CODE BLOCK THEMES */
+.markdown:not(.markdownLight):not(.handwritten) code { background: rgba(255, 255, 255, 0.15) !important; color: #e2e8f0 !important; }
+.markdown.markdownLight:not(.handwritten) code { background: rgba(0, 0, 0, 0.08) !important; color: #0f172a !important; }
+.markdown.handwritten:not(.markdownLight) code { background: rgba(56, 189, 248, 0.15) !important; color: #7dd3fc !important; }
+.markdown.markdownLight.handwritten code { background: rgba(30, 58, 138, 0.1) !important; color: #1e3a8a !important; }
+
+/* FORCE OVERRIDE TIMESTAMP THEMES */
+.markdown:not(.markdownLight):not(.handwritten) .timestampBtn { background: rgba(255, 255, 255, 0.15) !important; color: #e2e8f0 !important; border-color: rgba(255,255,255,0.2) !important; }
+.markdown.markdownLight:not(.handwritten) .timestampBtn { background: rgba(37, 99, 235, 0.1) !important; color: #1e3a8a !important; border-color: rgba(37, 99, 235, 0.3) !important; }
+.markdown.handwritten:not(.markdownLight) .timestampBtn { background: rgba(56, 189, 248, 0.15) !important; color: #7dd3fc !important; border-color: rgba(56, 189, 248, 0.3) !important; }
+.markdown.markdownLight.handwritten .timestampBtn { background: rgba(30, 58, 138, 0.1) !important; color: #1e3a8a !important; border-color: rgba(30, 58, 138, 0.3) !important; }
