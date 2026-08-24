@@ -8643,10 +8643,173 @@
 
 @media (max-width: 860px) {
   .siteFrame {
-    padding-top: 122px;
+    padding-top: 76px;
+    overflow-x: hidden;
   }
 
   .navbar {
     top: 0;
+    padding: 0.75rem 1rem;
+    height: auto;
+    backdrop-filter: blur(20px);
+    background: rgba(0, 0, 0, 0.88);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .navLinks {
+    display: none !important;
+  }
+
+  .navActions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .textButton {
+    display: none;
+  }
+
+  .hero {
+    padding: 2.5rem 1.25rem 2rem;
+    grid-template-columns: 1fr;
+    gap: 2rem;
+    min-height: auto;
+    text-align: center;
+  }
+
+  .heroCopy {
+    max-width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .heroCopy h1 {
+    font-size: clamp(2rem, 8vw, 3rem) !important;
+    line-height: 1.12;
+    letter-spacing: -0.03em;
+  }
+
+  .heroCopy p {
+    font-size: 1rem;
+    line-height: 1.5;
+    max-width: 480px;
+  }
+
+  .heroActions {
+    width: 100%;
+    max-width: 380px;
+    justify-content: center;
+  }
+
+  .heroActions .primaryButton {
+    width: 100%;
+    font-size: 1rem;
+    padding: 0.95rem 1.5rem;
+  }
+
+  .heroVisual {
+    width: 100%;
+    max-width: 100%;
+    overflow: hidden;
+  }
+
+  .metricsStrip {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 0.75rem;
+    padding: 1.5rem 1rem;
+    margin: 1.5rem 1rem;
+  }
+
+  .solutionFlow {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+    padding: 0 1rem;
+  }
+
+  .featureStack {
+    gap: 2.5rem;
+    padding: 0 1rem;
+  }
+
+  .featurePanel {
+    grid-template-columns: 1fr !important;
+    gap: 1.5rem;
+    padding: 1.5rem;
+    border-radius: 20px;
+  }
+
+  .featureCopy h3 {
+    font-size: 1.4rem;
+  }
+
+  .featureCopy p {
+    font-size: 0.95rem;
   }
 }
+
+/* Floating Mobile CTA */
+.mobileStickyCta {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .mobileStickyCta {
+    position: fixed;
+    bottom: 1.25rem;
+    left: 1rem;
+    right: 1rem;
+    z-index: 850;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.75rem 1.1rem;
+    border-radius: 999px;
+    background: rgba(10, 15, 20, 0.92);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    animation: mobileCtaFloat 0.5s ease-out;
+  }
+
+  .mobileStickyCta span {
+    font-size: 0.88rem;
+    font-weight: 700;
+    color: #f8fafc;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+
+  .mobileStickyCtaBtn {
+    background: #ffffff;
+    color: #000000;
+    font-size: 0.85rem;
+    font-weight: 800;
+    padding: 0.5rem 1rem;
+    border-radius: 999px;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    text-decoration: none;
+    transition: transform 180ms ease;
+  }
+
+  .mobileStickyCtaBtn:active {
+    transform: scale(0.96);
+  }
+}
+
+@keyframes mobileCtaFloat {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+

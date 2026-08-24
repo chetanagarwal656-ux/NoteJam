@@ -1799,6 +1799,16 @@ export default function LandingPage() {
         </footer>
       </motion.div>
 
+      {/* Floating Mobile Bottom CTA */}
+      <div className={styles.mobileStickyCta}>
+        <span>
+          <Sparkles size={16} color="#38bdf8" /> NoteJam AI
+        </span>
+        <Link className={styles.mobileStickyCtaBtn} href="/dashboard">
+          Start studying free <ArrowRight size={14} />
+        </Link>
+      </div>
+
       <AnimatePresence>
         {appModalOpen && (
           <motion.div

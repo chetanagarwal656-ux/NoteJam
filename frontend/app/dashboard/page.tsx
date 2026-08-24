@@ -1418,6 +1418,7 @@ const NoteApp = () => {
 
     return (
       <aside className={`${styles.artifactConsole} no-print`}>
+        <div className={styles.sheetGrabHandle} />
         <div className={styles.consoleHeader}>
           <div>
             <span>Workspace console</span>
@@ -1547,6 +1548,42 @@ const NoteApp = () => {
       {/* Main Document Canvas */}
       <main className={styles.mainCanvas}>
         <LiveBackground />
+
+        {/* Mobile Top Header (<=768px) */}
+        <header className={`${styles.mobileAppHeader} no-print`}>
+          <div className={styles.mobileAppLogo} onClick={() => resetWorkspace()}>
+            <Layers size={20} color="#38bdf8" />
+            <span>NoteJam</span>
+          </div>
+          <div className={styles.mobileAppNav}>
+            <button 
+              className={`${styles.mobileNavBtn} ${currentView === 'home' ? styles.mobileNavBtnActive : ''}`}
+              onClick={() => resetWorkspace()}
+            >
+              <Home size={15} />
+              <span>Studio</span>
+            </button>
+            <button 
+              className={`${styles.mobileNavBtn} ${currentView === 'notebooks' ? styles.mobileNavBtnActive : ''}`}
+              onClick={() => {
+                setIsPlaying(false);
+                if (currentView === 'notebooks' && markdown) {
+                  closeCurrentNoteToLibrary();
+                } else if (currentView === 'home') {
+                  setMarkdown(null);
+                  setCurrentNoteId(null);
+                  setCurrentView('notebooks');
+                } else {
+                  setCurrentView('notebooks');
+                }
+              }}
+            >
+              <BookOpen size={15} />
+              <span>Notes</span>
+            </button>
+            <UserButton appearance={{ elements: { userButtonAvatarBox: { width: '28px', height: '28px' } } }} />
+          </div>
+        </header>
         
         <div className={styles.workspaceWrapper}>
           {(currentView === 'home' || (currentView === 'notebooks' && markdown)) ? (
@@ -1748,6 +1785,87 @@ const NoteApp = () => {
             </div>
           )}
         </div>
+
+        {/* Mobile Bottom Artifact Navigation Bar */}
+        {markdown && (
+          <nav className={`${styles.mobileArtifactBar} no-print`}>
+            <button 
+              className={`${styles.mobileArtifactTab} ${activeArtifact === 'flashcards' ? styles.mobileArtifactTabActive : ''}`}
+              onClick={() => {
+                if (activeArtifact === 'flashcards' && isArtifactConsoleOpen) {
+                  setIsArtifactConsoleOpen(false);
+                  setActiveArtifact(null);
+                } else {
+                  setIsArtifactConsoleOpen(true);
+                  handleExportFlashcards();
+                }
+              }}
+            >
+              <Layers size={17} />
+              <span>Cards</span>
+            </button>
+            <button 
+              className={`${styles.mobileArtifactTab} ${activeArtifact === 'mindmap' ? styles.mobileArtifactTabActive : ''}`}
+              onClick={() => {
+                if (activeArtifact === 'mindmap' && isArtifactConsoleOpen) {
+                  setIsArtifactConsoleOpen(false);
+                  setActiveArtifact(null);
+                } else {
+                  setIsArtifactConsoleOpen(true);
+                  handleGenerateMindmap();
+                }
+              }}
+            >
+              <BrainCircuit size={17} />
+              <span>Mind Map</span>
+            </button>
+            <button 
+              className={`${styles.mobileArtifactTab} ${activeArtifact === 'cheatsheet' ? styles.mobileArtifactTabActive : ''}`}
+              onClick={() => {
+                if (activeArtifact === 'cheatsheet' && isArtifactConsoleOpen) {
+                  setIsArtifactConsoleOpen(false);
+                  setActiveArtifact(null);
+                } else {
+                  setIsArtifactConsoleOpen(true);
+                  handleGenerateCheatsheet();
+                }
+              }}
+            >
+              <FileSignature size={17} />
+              <span>Formula</span>
+            </button>
+            <button 
+              className={`${styles.mobileArtifactTab} ${activeArtifact === 'audio' ? styles.mobileArtifactTabActive : ''}`}
+              onClick={() => {
+                if (activeArtifact === 'audio' && isArtifactConsoleOpen) {
+                  setIsArtifactConsoleOpen(false);
+                  setActiveArtifact(null);
+                } else {
+                  setIsArtifactConsoleOpen(true);
+                  openArtifact('audio');
+                }
+              }}
+            >
+              <Volume2 size={17} />
+              <span>Audio</span>
+            </button>
+            <button 
+              className={`${styles.mobileArtifactTab} ${activeArtifact === 'chat' ? styles.mobileArtifactTabActive : ''}`}
+              onClick={() => {
+                if (activeArtifact === 'chat' && isArtifactConsoleOpen) {
+                  setIsArtifactConsoleOpen(false);
+                  setActiveArtifact(null);
+                } else {
+                  setIsArtifactConsoleOpen(true);
+                  openArtifact('chat');
+                }
+              }}
+            >
+              <MessageCircle size={17} />
+              <span>Chat</span>
+            </button>
+          </nav>
+        )}
       </main>
 
       {markdown && videoSrc && isSourcePinned && !fullscreenArtifact && (
