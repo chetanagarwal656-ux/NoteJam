@@ -2,7 +2,7 @@
 
 <!-- Automatically loaded into future sessions via workspace customization root .agents/AGENTS.md -->
 
-Refer to the complete, dense project context in [PROJECT_CONTEXT.md](file:///c:/Users/Chetan%20Agarwal/Downloads/Note_Jam/PROJECT_CONTEXT.md).
+Refer to the complete, dense project context in [PROJECT_CONTEXT.md](file:///c:/Users/Chetan%20Agarwal/Downloads/Note_Jam/PROJECT_CONTEXT.md) and mobile design roadmap in [MOBILE_EXPERIENCE_CONTEXT.md](file:///c:/Users/Chetan%20Agarwal/Downloads/Note_Jam/MOBILE_EXPERIENCE_CONTEXT.md).
 
 ## Critical Architectural Guidelines & Rules for NoteJam
 
