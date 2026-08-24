@@ -1299,7 +1299,7 @@ const NoteApp = () => {
             ) : (
               chatMessages.map((msg, i) => (
                 <div key={i} className={`${styles.chatMessage} ${styles[msg.role]}`}>
-                  <ReactMarkdown>{msg.content}</ReactMarkdown>
+                  <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{msg.content}</ReactMarkdown>
                 </div>
               ))
             )}
