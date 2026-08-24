@@ -408,13 +408,25 @@ def robust_gemini_call(contents, model='gemini-2.5-flash', is_json=False):
                 raise e
     raise Exception("Failed to generate content after retries.")
 
+def normalize_youtube_url(url: str) -> str:
+    """Normalize any YouTube URL (live, shorts, embed, youtu.be, query params) 
+    to the canonical https://www.youtube.com/watch?v=VIDEO_ID format that Gemini expects."""
+    cleaned = url.strip()
+    pattern = r'(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:watch\?v=|embed\/|v\/|shorts\/|live\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})'
+    match = re.search(pattern, cleaned)
+    if match:
+        video_id = match.group(1)
+        return f"https://www.youtube.com/watch?v={video_id}"
+    return cleaned
+
 def process_youtube_url_directly(url: str, language: str = "English") -> dict:
     """Process a YouTube URL by passing it directly to Gemini via Part.from_uri().
     Google's infrastructure fetches the video natively — no server-side download needed."""
-    print(f"Processing YouTube URL directly via Gemini: {url}")
+    canonical_url = normalize_youtube_url(url)
+    print(f"Processing YouTube URL directly via Gemini: {canonical_url} (raw: {url})")
     markdown_output = robust_gemini_call(
         contents=[
-            genai.types.Part.from_uri(file_uri=url, mime_type="video/mp4"),
+            genai.types.Part.from_uri(file_uri=canonical_url, mime_type="video/mp4"),
             SYSTEM_PROMPT.format(language=language)
         ],
         is_json=False
