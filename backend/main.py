@@ -166,7 +166,7 @@ CRITICAL INSTRUCTIONS FOR THE "markdown" FIELD:
 - MIND MAP: The VERY LAST thing in the markdown string MUST be a Mermaid.js diagram (wrapped in ```mermaid blocks) visualizing the hierarchy and connections of the core concepts taught in the lecture. It MUST be placed at the end of the document.
   * CRITICAL MERMAID RULES: Use `graph TD`. You MUST NOT use parentheses `()`, brackets `[]`, braces `{{}}`, or quotes `"` inside the visible node text. Keep node names extremely simple and alphanumeric only! (Example: `A[Control Systems] --> B[PID Controllers]`). Failure to follow this will break the renderer.
 - VISUALS: You cannot output images. If the video contains important diagrams, graphs, flowcharts, tables, mathematical equations, chemical structures, circuit diagrams, or anything drawn on a whiteboard or slide, YOU MUST meticulously recreate them using Mermaid.js diagrams, highly detailed Markdown Tables, LaTeX matrices, or structured text. Do NOT skip any visual content — recreate everything the teacher writes or draws.
-- MATH: Use LaTeX strictly. Inline: `$E = mc^2$`. Block: `$$...$$`.
+- MATH: YOU MUST USE LaTeX strictly for all math, variables, vectors, matrices, and superscripts. Inline: `$E = mc^2$`, `$R^n$`, `$A^T$`. Block: `$$...$$`. **CRITICAL: NEVER use markdown inline code backticks (like `R^n` or `A^T`) for math, vectors, or formulas. Always use dollar signs.**
 - VIDEO SYNC: Heavily inject exact timestamp tags `[MM:SS]` throughout the text whenever you explain a new concept, so the user can click them to sync the video.
 
 LANGUAGE:
@@ -349,6 +349,8 @@ def create_flashcards(req: FlashcardRequest, user_id: str = Depends(get_current_
     prompt = f"""
     Based on the following lecture notes, create a highly effective set of spaced-repetition flashcards.
     Depending on the depth and length of the notes, generate anywhere from 10 to 50 flashcards (10 being the minimum, 50 being the maximum).
+    CRITICAL: For math, equations, vectors, or superscripts, YOU MUST use LaTeX with dollar signs (e.g. $R^n$, $A^T$, $E=mc^2$). Do NOT use raw carets (^) or backticks for math.
+
     Output a strictly valid JSON array of objects, where each object has exactly three keys: "question", "answer", and "explanation".
     The "explanation" should be a brief 1-2 sentence clarification of WHY the answer is correct, to help the student understand if they get confused.
     
@@ -370,6 +372,7 @@ class DocumentRequest(BaseModel):
 def create_cheatsheet(req: DocumentRequest, user_id: str = Depends(get_current_user_id)):
     prompt = f"""
     Based on the following lecture notes, extract 3-7 critical formulas, equations, or short key definitions.
+    CRITICAL: For math, equations, vectors, or superscripts, YOU MUST use LaTeX with dollar signs (e.g. $R^n$, $A^T$, $E=mc^2$). Do NOT use raw carets (^) or backticks for math.
     Return ONLY a valid JSON array of strings. No markdown formatting outside the JSON array.
     Example: ["E=mc^2: Energy equals mass times the speed of light squared.", "Newton's First Law: An object at rest stays at rest."]
     
@@ -443,10 +446,12 @@ def create_mindmap(req: DocumentRequest, user_id: str = Depends(get_current_user
     2. Section Count & Sizing:
        - Generate 5 to 7 sections total. Keep quality and brevity high.
        - Assign `importance` (1, 2, or 3). Tag 1-3 primary concepts as `importance: 1`, secondary details as `2`, and compact chips as `3`.
-    3. Bullet Quality:
+    3. Bullet Quality & Math:
        - Write each bullet as a complete, standalone revision phrase a student could read aloud.
        - NEVER truncate mid-thought or write fragmented labels like "Program Execution (Crucial)".
-       - Maximum 48 characters per bullet, 2 to 3 bullets per section.
+       - Maximum 48 characters per bullet. Summarize naturally to fit this limit. DO NOT abruptly truncate sentences.
+       - CRITICAL: If the text contains math, equations, vectors, or superscripts, YOU MUST use inline LaTeX with dollar signs (e.g. $R^n$, $A^T$, $E=mc^2$). Do NOT use raw carets (^) or backticks for math.
+       - 2 to 3 bullets per section.
     4. Formulas, Examples & Takeaways:
        - Extract standalone formulas and practical examples into their dedicated arrays with `relatedSection` when taught in notes.
        - Include 2 to 4 high-yield `takeaways` for exam revision.

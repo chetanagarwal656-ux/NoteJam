@@ -825,16 +825,16 @@
   color: #0f172a !important;
   border: 1px solid var(--border);
 }
-.markdownLight h1 { color: #ffffff !important; }
-.markdownLight h2 { color: #ffffff !important; }
-.markdownLight h3 { color: #ffffff !important; }
-.markdownLight strong { color: #ffffff !important; }
-.markdownLight em { color: #ffffff !important; }
-.markdownLight a { color: #ffffff !important; }
-.markdownLight blockquote { background: rgba(255,255,255,0.06) !important; border-left-color: #ffffff !important; color: #e6e6e6 !important; }
+.markdownLight h1 { color: #0f172a !important; }
+.markdownLight h2 { color: #0f172a !important; }
+.markdownLight h3 { color: #0f172a !important; }
+.markdownLight strong { color: #0f172a !important; }
+.markdownLight em { color: #0f172a !important; }
+.markdownLight a { color: #2563eb !important; }
+.markdownLight blockquote { background: rgba(0,0,0,0.03) !important; border-left-color: #0f172a !important; color: #334155 !important; }
 .markdownLight th, .markdownLight td { border-color: rgba(0,0,0,0.1) !important; color: #0f172a !important; }
-.markdownLight th { background: rgba(255,255,255,0.08) !important; color: #ffffff !important; }
-.markdownLight code { background: rgba(255,255,255,0.08) !important; color: #ffffff !important; }
+.markdownLight th { background: rgba(0,0,0,0.05) !important; color: #0f172a !important; }
+.markdownLight code { background: rgba(0,0,0,0.06) !important; color: #0f172a !important; }
 .markdownLight pre code { color: #e2e8f0 !important; }
 .markdownLight .katex-display, .markdownLight .katex { color: #0f172a !important; }
 
@@ -2209,8 +2209,8 @@
 }
 
 .markdownLight.handwritten code {
-  background: rgba(254, 243, 199, 0.88) !important;
-  color: #92400e !important;
+  background: rgba(226, 232, 240, 0.6) !important;
+  color: #1e3a8a !important;
 }
 
 .markdown:not(.markdownLight).handwritten {
