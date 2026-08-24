@@ -2,7 +2,7 @@
 
 import { useCallback, useState, useEffect, useRef } from "react";
 import ReactPlayer from "react-player";
-import { Upload, Link as LinkIcon, Sparkles, Download, Loader2, Home, Clock, BookOpen, Layers, BrainCircuit, FileSignature, X, ChevronLeft, ChevronRight, RotateCcw, MessageCircle, Send, Save, Trash2, PenTool, Moon, Sun, Maximize2, Minimize2, Volume2, Play, Pause, FastForward, Rewind, PanelRightClose } from "lucide-react";
+import { Upload, Link as LinkIcon, Sparkles, Download, Loader2, Home, Clock, BookOpen, Layers, BrainCircuit, FileSignature, X, ChevronLeft, ChevronRight, RotateCcw, MessageCircle, Send, Save, Trash2, PenTool, Moon, Sun, Maximize2, Minimize2, Volume2, Play, Pause, FastForward, Rewind, PanelRightClose, FolderPlus, Folder as FolderIcon, FolderOpen, FolderSync } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import mermaid from "mermaid";
 import remarkMath from "remark-math";
@@ -47,6 +47,16 @@ type MindmapData = {
   footer?: string;
   nodes?: MindmapNode[];
   links?: MindmapLink[];
+  structureType?: "hub" | "sequence" | "hierarchy" | "comparison" | "timeline";
+  compareGroupLabels?: { A: string; B: string };
+};
+type Folder = {
+  id: string;
+  name: string;
+  color?: string;
+  icon?: string;
+  note_count?: number;
+  created_at: string;
 };
 type SavedNote = {
   id: string;
@@ -59,6 +69,7 @@ type SavedNote = {
   video_url?: string | null;
   ai_podcast_url?: string | null;
   ai_debate_url?: string | null;
+  folder_id?: string | null;
 };
 type ReactMarkdownCodeProps = {
   inline?: boolean;
@@ -346,8 +357,31 @@ const NoteApp = () => {
     return () => window.clearTimeout(timer);
   }, [pendingSeekSeconds, isSourcePinned, activeArtifact]);
 
+  // Folder states
+  const [folders, setFolders] = useState<Folder[]>([]);
+  const [selectedFolderId, setSelectedFolderId] = useState<string>("all");
+  const [isFolderModalOpen, setIsFolderModalOpen] = useState(false);
+  const [folderNameInput, setFolderNameInput] = useState("");
+  const [folderColorInput, setFolderColorInput] = useState("#38bdf8");
+  const [folderIconInput, setFolderIconInput] = useState("📚");
+  const [movingNote, setMovingNote] = useState<SavedNote | null>(null);
+  const [isMovingModalOpen, setIsMovingModalOpen] = useState(false);
+
+  const fetchFolders = useCallback(async () => {
+    if (!isLoaded || !isSignedIn) return;
+    try {
+      const res = await authFetch(`${API_BASE}/folders`);
+      if (res.ok) {
+        const data = await res.json();
+        setFolders(data.folders || []);
+      }
+    } catch (e) {
+      console.error("Error fetching folders:", e);
+    }
+  }, [isLoaded, isSignedIn, authFetch]);
+
   const fetchNotes = useCallback(async () => {
-    if (!isLoaded || !isSignedIn) return; // Do not fetch if auth is not ready or not signed in
+    if (!isLoaded || !isSignedIn) return;
     try {
       const res = await authFetch(`${API_BASE}/notes`);
       const data = await res.json();
@@ -366,11 +400,73 @@ const NoteApp = () => {
           setCurrentView("home");
         } else {
           void fetchNotes();
+          void fetchFolders();
         }
       }, 0);
       return () => window.clearTimeout(timer);
     }
-  }, [currentView, isLoaded, isSignedIn, clerk, fetchNotes]);
+  }, [currentView, isLoaded, isSignedIn, clerk, fetchNotes, fetchFolders]);
+
+  const handleCreateFolder = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!folderNameInput.trim()) return;
+    try {
+      const res = await authFetch(`${API_BASE}/folders`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: folderNameInput.trim(),
+          color: folderColorInput,
+          icon: folderIconInput
+        })
+      });
+      if (res.ok) {
+        setFolderNameInput("");
+        setIsFolderModalOpen(false);
+        void fetchFolders();
+        void fetchNotes();
+      }
+    } catch (err) {
+      console.error("Error creating folder:", err);
+    }
+  };
+
+  const handleDeleteFolder = async (folderId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!confirm("Are you sure you want to delete this folder? (Your notes will NOT be deleted)")) return;
+    try {
+      const res = await authFetch(`${API_BASE}/folders/${folderId}`, {
+        method: "DELETE"
+      });
+      if (res.ok) {
+        if (selectedFolderId === folderId) {
+          setSelectedFolderId("all");
+        }
+        void fetchFolders();
+        void fetchNotes();
+      }
+    } catch (err) {
+      console.error("Error deleting folder:", err);
+    }
+  };
+
+  const handleMoveNote = async (noteId: string, targetFolderId: string | null) => {
+    try {
+      const res = await authFetch(`${API_BASE}/notes/${noteId}/folder`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ folder_id: targetFolderId })
+      });
+      if (res.ok) {
+        setIsMovingModalOpen(false);
+        setMovingNote(null);
+        void fetchNotes();
+        void fetchFolders();
+      }
+    } catch (err) {
+      console.error("Error moving note:", err);
+    }
+  };
 
   const saveCurrentNote = async () => {
     if (!isLoaded) return;
@@ -1756,35 +1852,256 @@ const NoteApp = () => {
           </>
           ) : (
               <div className={styles.notebooksContainer}>
-                <h2 style={{ marginBottom: '2rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <BookOpen size={24} color="var(--primary)" /> Learning Artifacts
-              </h2>
-              {savedNotes.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '4rem 0', color: 'var(--muted)' }}>
-                  <Layers size={48} style={{ opacity: 0.5, marginBottom: '1rem' }} />
-                  <p>No saved notes yet. Start learning to build your library!</p>
+                <div className={styles.notebooksHeader}>
+                  <h2 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', margin: 0 }}>
+                    <BookOpen size={24} color="var(--primary)" /> Learning Artifacts
+                  </h2>
+                  <button 
+                    className={styles.newFolderBtn}
+                    onClick={() => {
+                      setFolderNameInput("");
+                      setFolderColorInput("#38bdf8");
+                      setFolderIconInput("📚");
+                      setIsFolderModalOpen(true);
+                    }}
+                  >
+                    <FolderPlus size={16} /> New Subject
+                  </button>
                 </div>
-              ) : (
-                <div className={styles.notesGrid}>
-                  {savedNotes.map((note) => (
-                    <div key={note.id} className={styles.noteCard} onClick={() => loadNote(note.id)}>
-                      <div className={styles.noteCardHeader}>
-                        <h3>{note.title}</h3>
-                        <button 
-                          className={styles.deleteBtn}
-                          onClick={(e) => { e.stopPropagation(); deleteNote(note.id); }}
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
-                      <p className={styles.noteDate}>{new Date(note.created_at).toLocaleDateString()} {new Date(note.created_at).toLocaleTimeString()}</p>
-                    </div>
+
+                {/* Subject Filter Bar */}
+                <div className={styles.folderTabsBar}>
+                  <button 
+                    className={`${styles.folderTab} ${selectedFolderId === 'all' ? styles.folderTabActive : ''}`}
+                    onClick={() => setSelectedFolderId('all')}
+                  >
+                    <span>📚 All Notes</span>
+                    <span className={styles.folderTabBadge}>{savedNotes.length}</span>
+                  </button>
+
+                  {folders.map((f) => (
+                    <button 
+                      key={f.id}
+                      className={`${styles.folderTab} ${selectedFolderId === f.id ? styles.folderTabActive : ''}`}
+                      onClick={() => setSelectedFolderId(f.id)}
+                      style={selectedFolderId === f.id ? { borderColor: f.color, background: `${f.color}18`, color: '#ffffff' } : {}}
+                    >
+                      <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                        <span>{f.icon || "📁"}</span>
+                        <span>{f.name}</span>
+                      </span>
+                      <span className={styles.folderTabBadge} style={{ background: f.color ? `${f.color}35` : undefined }}>
+                        {savedNotes.filter(n => n.folder_id === f.id).length}
+                      </span>
+                      <span 
+                        className={styles.folderDeleteIcon}
+                        title="Delete folder"
+                        onClick={(e) => handleDeleteFolder(f.id, e)}
+                      >
+                        <X size={12} />
+                      </span>
+                    </button>
                   ))}
                 </div>
-              )}
-            </div>
-          )}
+
+                {savedNotes.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '4rem 0', color: 'var(--muted)' }}>
+                    <Layers size={48} style={{ opacity: 0.5, marginBottom: '1rem' }} />
+                    <p>No saved notes yet. Start learning to build your library!</p>
+                  </div>
+                ) : (
+                  (() => {
+                    const filteredNotes = selectedFolderId === 'all'
+                      ? savedNotes
+                      : savedNotes.filter(n => n.folder_id === selectedFolderId);
+
+                    if (filteredNotes.length === 0) {
+                      return (
+                        <div style={{ textAlign: 'center', padding: '3rem 0', color: 'var(--muted)' }}>
+                          <FolderOpen size={40} style={{ opacity: 0.5, marginBottom: '0.8rem' }} />
+                          <p>No notes in this subject yet. Move notes here to organize your study!</p>
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div className={styles.notesGrid}>
+                        {filteredNotes.map((note) => {
+                          const noteFolder = folders.find(f => f.id === note.folder_id);
+
+                          return (
+                            <div key={note.id} className={styles.noteCard} onClick={() => loadNote(note.id)}>
+                              <div className={styles.noteCardHeader}>
+                                <h3>{note.title}</h3>
+                                <div className={styles.noteCardActions} onClick={(e) => e.stopPropagation()}>
+                                  <button 
+                                    className={styles.cardActionBtn} 
+                                    title="Move to Subject"
+                                    onClick={() => {
+                                      setMovingNote(note);
+                                      setIsMovingModalOpen(true);
+                                    }}
+                                  >
+                                    <FolderSync size={15} />
+                                  </button>
+                                  <button 
+                                    className={styles.deleteBtn}
+                                    title="Delete note"
+                                    onClick={() => deleteNote(note.id)}
+                                  >
+                                    <Trash2 size={15} />
+                                  </button>
+                                </div>
+                              </div>
+                              
+                              <div className={styles.noteCardFooter}>
+                                {noteFolder ? (
+                                  <span 
+                                    className={styles.noteFolderBadge}
+                                    style={{
+                                      borderColor: `${noteFolder.color || '#38bdf8'}50`,
+                                      background: `${noteFolder.color || '#38bdf8'}15`,
+                                      color: '#ffffff'
+                                    }}
+                                  >
+                                    <span>{noteFolder.icon || "📁"}</span>
+                                    <span>{noteFolder.name}</span>
+                                  </span>
+                                ) : (
+                                  <span className={styles.noteFolderUnassigned}>Uncategorized</span>
+                                )}
+                                <span className={styles.noteDate}>
+                                  {new Date(note.created_at).toLocaleDateString()}
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()
+                )}
+              </div>
+            )}
         </div>
+
+        {/* --- Create Subject / Folder Modal --- */}
+        {isFolderModalOpen && (
+          <div className={styles.folderModalOverlay} onClick={() => setIsFolderModalOpen(false)}>
+            <div className={styles.folderModal} onClick={(e) => e.stopPropagation()}>
+              <div className={styles.folderModalHeader}>
+                <h3>Create New Subject</h3>
+                <button className={styles.modalCloseBtn} onClick={() => setIsFolderModalOpen(false)}>
+                  <X size={18} />
+                </button>
+              </div>
+
+              <form onSubmit={handleCreateFolder}>
+                <label className={styles.modalLabel}>Subject Name</label>
+                <input 
+                  type="text"
+                  className={styles.modalInput}
+                  placeholder="e.g. Linear Algebra, CS50, Biology..."
+                  value={folderNameInput}
+                  onChange={(e) => setFolderNameInput(e.target.value)}
+                  autoFocus
+                  required
+                />
+
+                <label className={styles.modalLabel}>Choose Icon</label>
+                <div className={styles.iconPickerGrid}>
+                  {["📚", "📐", "⚛️", "💻", "🧪", "🧬", "📜", "💡", "🎯", "🧠", "⚡", "📖"].map(emoji => (
+                    <button 
+                      type="button"
+                      key={emoji}
+                      className={`${styles.iconOptionBtn} ${folderIconInput === emoji ? styles.iconOptionBtnActive : ''}`}
+                      onClick={() => setFolderIconInput(emoji)}
+                    >
+                      {emoji}
+                    </button>
+                  ))}
+                </div>
+
+                <label className={styles.modalLabel}>Accent Color</label>
+                <div className={styles.colorPickerGrid}>
+                  {[
+                    { color: "#38bdf8", name: "Sky" },
+                    { color: "#10b981", name: "Emerald" },
+                    { color: "#a855f7", name: "Purple" },
+                    { color: "#f59e0b", name: "Amber" },
+                    { color: "#ec4899", name: "Pink" },
+                    { color: "#6366f1", name: "Indigo" }
+                  ].map(c => (
+                    <button
+                      type="button"
+                      key={c.color}
+                      className={`${styles.colorSwatch} ${folderColorInput === c.color ? styles.colorSwatchActive : ''}`}
+                      style={{ background: c.color }}
+                      onClick={() => setFolderColorInput(c.color)}
+                    />
+                  ))}
+                </div>
+
+                <div className={styles.modalFooter}>
+                  <button 
+                    type="button" 
+                    className={styles.modalCancelBtn}
+                    onClick={() => setIsFolderModalOpen(false)}
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    type="submit" 
+                    className={styles.modalSubmitBtn}
+                    disabled={!folderNameInput.trim()}
+                  >
+                    Create Subject
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* --- Move Note to Subject Modal --- */}
+        {isMovingModalOpen && movingNote && (
+          <div className={styles.folderModalOverlay} onClick={() => { setIsMovingModalOpen(false); setMovingNote(null); }}>
+            <div className={styles.folderModal} onClick={(e) => e.stopPropagation()}>
+              <div className={styles.folderModalHeader}>
+                <div>
+                  <span style={{ fontSize: '0.8rem', color: 'var(--muted)' }}>Move Note</span>
+                  <h3 style={{ fontSize: '1.05rem', margin: 0 }}>{movingNote.title}</h3>
+                </div>
+                <button className={styles.modalCloseBtn} onClick={() => { setIsMovingModalOpen(false); setMovingNote(null); }}>
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className={styles.moveFolderList}>
+                <button 
+                  className={`${styles.moveFolderItem} ${!movingNote.folder_id ? styles.moveFolderItemActive : ''}`}
+                  onClick={() => handleMoveNote(movingNote.id, null)}
+                >
+                  <span>📁 Uncategorized (All Notes)</span>
+                </button>
+
+                {folders.map(f => (
+                  <button 
+                    key={f.id}
+                    className={`${styles.moveFolderItem} ${movingNote.folder_id === f.id ? styles.moveFolderItemActive : ''}`}
+                    onClick={() => handleMoveNote(movingNote.id, f.id)}
+                    style={movingNote.folder_id === f.id ? { borderColor: f.color, background: `${f.color}15` } : {}}
+                  >
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <span>{f.icon || "📁"}</span>
+                      <span>{f.name}</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Mobile Bottom Artifact Navigation Bar */}
         {markdown && (

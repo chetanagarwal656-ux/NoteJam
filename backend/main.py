@@ -49,6 +49,16 @@ def init_sqlite_db():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("""
+        CREATE TABLE IF NOT EXISTS folders (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            color TEXT DEFAULT '#38bdf8',
+            icon TEXT DEFAULT '📚',
+            user_id TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+    """)
+    cursor.execute("""
         CREATE TABLE IF NOT EXISTS notes (
             id TEXT PRIMARY KEY,
             title TEXT,
@@ -72,6 +82,10 @@ def init_sqlite_db():
         cursor.execute("ALTER TABLE notes ADD COLUMN user_id TEXT")
     except sqlite3.OperationalError:
         pass
+    try:
+        cursor.execute("ALTER TABLE notes ADD COLUMN folder_id TEXT")
+    except sqlite3.OperationalError:
+        pass
     conn.commit()
     conn.close()
 
@@ -79,6 +93,103 @@ if not supabase_client:
     init_sqlite_db()
 
 # --- Unified Database Helper Functions ---
+def db_create_folder(folder_id: str, name: str, color: Optional[str], icon: Optional[str], user_id: str, created_at: str) -> dict:
+    folder_color = color or "#38bdf8"
+    folder_icon = icon or "📚"
+    if supabase_client:
+        row = {
+            "id": folder_id,
+            "name": name,
+            "color": folder_color,
+            "icon": folder_icon,
+            "user_id": user_id,
+            "created_at": created_at
+        }
+        supabase_client.table("folders").insert(row).execute()
+        return {"id": folder_id, "name": name, "color": folder_color, "icon": folder_icon, "created_at": created_at, "note_count": 0}
+    else:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO folders (id, name, color, icon, user_id, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (folder_id, name, folder_color, folder_icon, user_id, created_at))
+        conn.commit()
+        conn.close()
+        return {"id": folder_id, "name": name, "color": folder_color, "icon": folder_icon, "created_at": created_at, "note_count": 0}
+
+def db_get_folders(user_id: str) -> list[dict]:
+    if supabase_client:
+        folders_res = supabase_client.table("folders").select("*").eq("user_id", user_id).order("created_at", desc=False).execute()
+        folders = folders_res.data or []
+        notes_res = supabase_client.table("notes").select("folder_id").eq("user_id", user_id).execute()
+        notes_data = notes_res.data or []
+        counts: dict[str, int] = {}
+        for n in notes_data:
+            fid = n.get("folder_id")
+            if fid:
+                counts[fid] = counts.get(fid, 0) + 1
+        for f in folders:
+            f["note_count"] = counts.get(f["id"], 0)
+        return folders
+    else:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM folders WHERE user_id = ? ORDER BY created_at ASC", (user_id,))
+        folders = [dict(row) for row in cursor.fetchall()]
+        cursor.execute("SELECT folder_id, COUNT(*) as count FROM notes WHERE user_id = ? AND folder_id IS NOT NULL GROUP BY folder_id", (user_id,))
+        counts = {row["folder_id"]: row["count"] for row in cursor.fetchall()}
+        conn.close()
+        for f in folders:
+            f["note_count"] = counts.get(f["id"], 0)
+        return folders
+
+def db_update_folder(folder_id: str, user_id: str, name: str, color: Optional[str] = None, icon: Optional[str] = None) -> dict:
+    if supabase_client:
+        row: dict[str, Any] = {"name": name}
+        if color is not None: row["color"] = color
+        if icon is not None: row["icon"] = icon
+        supabase_client.table("folders").update(row).eq("id", folder_id).eq("user_id", user_id).execute()
+        return {"message": "Folder updated"}
+    else:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE folders 
+            SET name = ?, color = COALESCE(?, color), icon = COALESCE(?, icon)
+            WHERE id = ? AND user_id = ?
+        """, (name, color, icon, folder_id, user_id))
+        conn.commit()
+        conn.close()
+        return {"message": "Folder updated"}
+
+def db_delete_folder(folder_id: str, user_id: str) -> dict:
+    if supabase_client:
+        supabase_client.table("notes").update({"folder_id": None}).eq("folder_id", folder_id).eq("user_id", user_id).execute()
+        supabase_client.table("folders").delete().eq("id", folder_id).eq("user_id", user_id).execute()
+        return {"message": "Folder deleted"}
+    else:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("UPDATE notes SET folder_id = NULL WHERE folder_id = ? AND user_id = ?", (folder_id, user_id))
+        cursor.execute("DELETE FROM folders WHERE id = ? AND user_id = ?", (folder_id, user_id))
+        conn.commit()
+        conn.close()
+        return {"message": "Folder deleted"}
+
+def db_move_note_to_folder(note_id: str, user_id: str, folder_id: Optional[str]) -> dict:
+    if supabase_client:
+        supabase_client.table("notes").update({"folder_id": folder_id}).eq("id", note_id).eq("user_id", user_id).execute()
+        return {"message": "Note moved successfully"}
+    else:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("UPDATE notes SET folder_id = ? WHERE id = ? AND user_id = ?", (folder_id, note_id, user_id))
+        conn.commit()
+        conn.close()
+        return {"message": "Note moved successfully"}
+
 def db_save_note(
     note_id: str,
     title: str,
@@ -90,7 +201,8 @@ def db_save_note(
     mindmap: Any = None,
     flashcards: Any = None,
     ai_podcast_url: Optional[str] = None,
-    ai_debate_url: Optional[str] = None
+    ai_debate_url: Optional[str] = None,
+    folder_id: Optional[str] = None
 ) -> dict:
     if supabase_client:
         row = {
@@ -105,6 +217,7 @@ def db_save_note(
             "ai_podcast_url": ai_podcast_url,
             "ai_debate_url": ai_debate_url,
             "user_id": user_id,
+            "folder_id": folder_id
         }
         supabase_client.table("notes").upsert(row).execute()
         return {"id": note_id, "message": "Note saved successfully"}
@@ -112,8 +225,8 @@ def db_save_note(
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         cursor.execute("""
-            INSERT INTO notes (id, title, video_url, markdown, cheatsheet, mindmap, flashcards, created_at, ai_podcast_url, ai_debate_url, user_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO notes (id, title, video_url, markdown, cheatsheet, mindmap, flashcards, created_at, ai_podcast_url, ai_debate_url, user_id, folder_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             note_id,
             title,
@@ -125,21 +238,28 @@ def db_save_note(
             created_at,
             ai_podcast_url,
             ai_debate_url,
-            user_id
+            user_id,
+            folder_id
         ))
         conn.commit()
         conn.close()
         return {"id": note_id, "message": "Note saved successfully"}
 
-def db_get_notes(user_id: str) -> list[dict]:
+def db_get_notes(user_id: str, folder_id: Optional[str] = None) -> list[dict]:
     if supabase_client:
-        res = supabase_client.table("notes").select("id, title, created_at, video_url").eq("user_id", user_id).order("created_at", desc=True).execute()
+        query = supabase_client.table("notes").select("id, title, created_at, video_url, folder_id").eq("user_id", user_id)
+        if folder_id:
+            query = query.eq("folder_id", folder_id)
+        res = query.order("created_at", desc=True).execute()
         return res.data or []
     else:
         conn = sqlite3.connect(DB_PATH)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
-        cursor.execute("SELECT id, title, created_at, video_url FROM notes WHERE user_id = ? ORDER BY created_at DESC", (user_id,))
+        if folder_id:
+            cursor.execute("SELECT id, title, created_at, video_url, folder_id FROM notes WHERE user_id = ? AND folder_id = ? ORDER BY created_at DESC", (user_id, folder_id))
+        else:
+            cursor.execute("SELECT id, title, created_at, video_url, folder_id FROM notes WHERE user_id = ? ORDER BY created_at DESC", (user_id,))
         notes = [dict(row) for row in cursor.fetchall()]
         conn.close()
         return notes
@@ -185,7 +305,8 @@ def db_update_note(
     mindmap: Any = None,
     flashcards: Any = None,
     ai_podcast_url: Optional[str] = None,
-    ai_debate_url: Optional[str] = None
+    ai_debate_url: Optional[str] = None,
+    folder_id: Optional[str] = None
 ) -> dict:
     if supabase_client:
         row = {
@@ -197,6 +318,7 @@ def db_update_note(
             "flashcards": json.dumps(flashcards) if flashcards else None,
             "ai_podcast_url": ai_podcast_url,
             "ai_debate_url": ai_debate_url,
+            "folder_id": folder_id
         }
         supabase_client.table("notes").update(row).eq("id", note_id).eq("user_id", user_id).execute()
         return {"message": "Note updated"}
@@ -205,7 +327,7 @@ def db_update_note(
         cursor = conn.cursor()
         cursor.execute("""
             UPDATE notes 
-            SET title = ?, video_url = ?, markdown = ?, cheatsheet = ?, mindmap = ?, flashcards = ?, ai_podcast_url = ?, ai_debate_url = ?
+            SET title = ?, video_url = ?, markdown = ?, cheatsheet = ?, mindmap = ?, flashcards = ?, ai_podcast_url = ?, ai_debate_url = ?, folder_id = ?
             WHERE id = ? AND user_id = ?
         """, (
             title,
@@ -216,6 +338,7 @@ def db_update_note(
             json.dumps(flashcards) if flashcards else None,
             ai_podcast_url,
             ai_debate_url,
+            folder_id,
             note_id,
             user_id
         ))
@@ -926,6 +1049,14 @@ def get_audio(filename: str):
 
 
 
+class FolderData(BaseModel):
+    name: str
+    color: Optional[str] = "#38bdf8"
+    icon: Optional[str] = "📚"
+
+class MoveNoteRequest(BaseModel):
+    folder_id: Optional[str] = None
+
 class NoteData(BaseModel):
     title: str
     video_url: Optional[str] = None
@@ -935,7 +1066,46 @@ class NoteData(BaseModel):
     flashcards: Optional[list] = None
     ai_podcast_url: Optional[str] = None
     ai_debate_url: Optional[str] = None
+    folder_id: Optional[str] = None
 
+# --- Folder Management Endpoints ---
+@app.get("/folders")
+def get_folders(user_id: str = Depends(get_current_user_id)):
+    folders = db_get_folders(user_id)
+    return {"folders": folders}
+
+@app.post("/folders")
+def create_folder(folder: FolderData, user_id: str = Depends(get_current_user_id)):
+    folder_id = uuid.uuid4().hex
+    created_at = datetime.now().isoformat()
+    return db_create_folder(
+        folder_id=folder_id,
+        name=folder.name.strip(),
+        color=folder.color,
+        icon=folder.icon,
+        user_id=user_id,
+        created_at=created_at
+    )
+
+@app.put("/folders/{folder_id}")
+def update_folder(folder_id: str, folder: FolderData, user_id: str = Depends(get_current_user_id)):
+    return db_update_folder(
+        folder_id=folder_id,
+        user_id=user_id,
+        name=folder.name.strip(),
+        color=folder.color,
+        icon=folder.icon
+    )
+
+@app.delete("/folders/{folder_id}")
+def delete_folder(folder_id: str, user_id: str = Depends(get_current_user_id)):
+    return db_delete_folder(folder_id, user_id)
+
+@app.put("/notes/{note_id}/folder")
+def move_note_to_folder(note_id: str, req: MoveNoteRequest, user_id: str = Depends(get_current_user_id)):
+    return db_move_note_to_folder(note_id, user_id, req.folder_id)
+
+# --- Note Endpoints ---
 @app.post("/notes")
 def save_note(note: NoteData, user_id: str = Depends(get_current_user_id)):
     note_id = uuid.uuid4().hex
@@ -951,12 +1121,13 @@ def save_note(note: NoteData, user_id: str = Depends(get_current_user_id)):
         mindmap=note.mindmap,
         flashcards=note.flashcards,
         ai_podcast_url=note.ai_podcast_url,
-        ai_debate_url=note.ai_debate_url
+        ai_debate_url=note.ai_debate_url,
+        folder_id=note.folder_id
     )
 
 @app.get("/notes")
-def get_notes(user_id: str = Depends(get_current_user_id)):
-    notes = db_get_notes(user_id)
+def get_notes(folder_id: Optional[str] = None, user_id: str = Depends(get_current_user_id)):
+    notes = db_get_notes(user_id, folder_id=folder_id)
     return {"notes": notes}
 
 @app.get("/notes/{note_id}")
@@ -978,7 +1149,8 @@ def update_note(note_id: str, note: NoteData, user_id: str = Depends(get_current
         mindmap=note.mindmap,
         flashcards=note.flashcards,
         ai_podcast_url=note.ai_podcast_url,
-        ai_debate_url=note.ai_debate_url
+        ai_debate_url=note.ai_debate_url,
+        folder_id=note.folder_id
     )
 
 @app.delete("/notes/{note_id}")
