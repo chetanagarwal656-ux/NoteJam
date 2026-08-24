@@ -7,14 +7,15 @@ Refer to the complete, dense project context in [PROJECT_CONTEXT.md](file:///c:/
 ## Critical Architectural Guidelines & Rules for NoteJam
 
 1. **Technology Stack**:
-   - **Backend**: FastAPI (`backend/main.py`), Python 3.10+, `google-genai` (gemini-2.5-flash), `edge-tts`, SQLite (`backend/notejam.db`).
+   - **Backend**: FastAPI (`backend/main.py`), Python 3.10+, `google-genai` (gemini-2.5-flash), `edge-tts`, Supabase PostgreSQL / SQLite fallback (`backend/notejam.db`).
    - **Frontend**: Next.js 16 (App Router), React 19, TypeScript 5, Vanilla CSS Modules (`page.module.css`, `landing.module.css`), `framer-motion`, `lucide-react`, `rehype-katex`, `remark-math`, `mermaid`, Clerk Auth.
    - **No TailwindCSS**: Never add or use Tailwind CSS classes; use CSS modules and variables in `globals.css`.
 
 2. **Database Specifications**:
-   - SQLite table: `notes` with columns (`id`, `title`, `video_url`, `markdown`, `cheatsheet`, `mindmap`, `flashcards`, `created_at`, `ai_podcast_url`, `ai_debate_url`).
-   - JSON fields (`cheatsheet`, `mindmap`, `flashcards`) must be serialized with `json.dumps()` on write and parsed with `json.loads()` on read.
-   - All SQL operations must use parameterized queries (`?`).
+   - Table: `notes` with columns (`id`, `title`, `video_url`, `markdown`, `cheatsheet`, `mindmap`, `flashcards`, `created_at`, `ai_podcast_url`, `ai_debate_url`, `user_id`).
+   - Persistent cloud storage powered by Supabase (`supabase-py`) with fallback to local SQLite when credentials are not configured.
+   - Smart AI Title Generation (Approach B) automatically saves generated notes on backend completion.
+   - JSON fields (`cheatsheet`, `mindmap`, `flashcards`) serialized on write and parsed on read.
 
 3. **Gemini & AI Processing Rules**:
    - Trailing Mermaid diagram in markdown must strictly follow `graph TD` and never include brackets `[]`, parentheses `()`, or quotes `"` in visible node labels.

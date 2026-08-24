@@ -4,7 +4,7 @@ import uuid
 import subprocess
 import time
 import json
-from typing import Optional
+from typing import Optional, Any
 from fastapi import FastAPI, UploadFile, Form, HTTPException, Header, Depends
 from pydantic import BaseModel
 import threading
@@ -16,6 +16,7 @@ import sqlite3
 from datetime import datetime
 import jwt
 from jwt import PyJWKClient
+from supabase import create_client, Client
 
 load_dotenv()
 
@@ -29,13 +30,22 @@ DB_PATH = (
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 TEMP_DIR = os.path.join(BASE_DIR, "temp")
 
-def get_allowed_origins() -> list[str]:
-    raw_origins = os.getenv("ALLOWED_ORIGINS", "*")
-    origins = [origin.strip() for origin in raw_origins.split(",") if origin.strip()]
-    return origins or ["*"]
+# --- Supabase Setup ---
+SUPABASE_URL = os.getenv("SUPABASE_URL", "").strip()
+SUPABASE_KEY = os.getenv("SUPABASE_KEY", "").strip()
+supabase_client: Optional[Client] = (
+    create_client(SUPABASE_URL, SUPABASE_KEY)
+    if SUPABASE_URL and SUPABASE_KEY
+    else None
+)
 
-# Initialize Database
-def init_db():
+if supabase_client:
+    print("Using Supabase cloud database.")
+else:
+    print("Supabase credentials not found. Falling back to local SQLite database.")
+
+# Initialize SQLite Database (fallback mode)
+def init_sqlite_db():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("""
@@ -65,7 +75,166 @@ def init_db():
     conn.commit()
     conn.close()
 
-init_db()
+if not supabase_client:
+    init_sqlite_db()
+
+# --- Unified Database Helper Functions ---
+def db_save_note(
+    note_id: str,
+    title: str,
+    video_url: str,
+    markdown: str,
+    user_id: str,
+    created_at: str,
+    cheatsheet: Any = None,
+    mindmap: Any = None,
+    flashcards: Any = None,
+    ai_podcast_url: Optional[str] = None,
+    ai_debate_url: Optional[str] = None
+) -> dict:
+    if supabase_client:
+        row = {
+            "id": note_id,
+            "title": title,
+            "video_url": video_url or "",
+            "markdown": markdown,
+            "cheatsheet": json.dumps(cheatsheet) if cheatsheet else None,
+            "mindmap": json.dumps(mindmap) if mindmap else None,
+            "flashcards": json.dumps(flashcards) if flashcards else None,
+            "created_at": created_at,
+            "ai_podcast_url": ai_podcast_url,
+            "ai_debate_url": ai_debate_url,
+            "user_id": user_id,
+        }
+        supabase_client.table("notes").upsert(row).execute()
+        return {"id": note_id, "message": "Note saved successfully"}
+    else:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO notes (id, title, video_url, markdown, cheatsheet, mindmap, flashcards, created_at, ai_podcast_url, ai_debate_url, user_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            note_id,
+            title,
+            video_url or "",
+            markdown,
+            json.dumps(cheatsheet) if cheatsheet else None,
+            json.dumps(mindmap) if mindmap else None,
+            json.dumps(flashcards) if flashcards else None,
+            created_at,
+            ai_podcast_url,
+            ai_debate_url,
+            user_id
+        ))
+        conn.commit()
+        conn.close()
+        return {"id": note_id, "message": "Note saved successfully"}
+
+def db_get_notes(user_id: str) -> list[dict]:
+    if supabase_client:
+        res = supabase_client.table("notes").select("id, title, created_at, video_url").eq("user_id", user_id).order("created_at", desc=True).execute()
+        return res.data or []
+    else:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, title, created_at, video_url FROM notes WHERE user_id = ? ORDER BY created_at DESC", (user_id,))
+        notes = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        return notes
+
+def db_get_note(note_id: str, user_id: str) -> Optional[dict]:
+    if supabase_client:
+        res = supabase_client.table("notes").select("*").eq("id", note_id).eq("user_id", user_id).execute()
+        if not res.data:
+            return None
+        data = res.data[0]
+        for field in ["cheatsheet", "mindmap", "flashcards"]:
+            if data.get(field) and isinstance(data[field], str):
+                try:
+                    data[field] = json.loads(data[field])
+                except Exception:
+                    pass
+        return data
+    else:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM notes WHERE id = ? AND user_id = ?", (note_id, user_id))
+        row = cursor.fetchone()
+        conn.close()
+        if not row:
+            return None
+        data = dict(row)
+        if data.get("cheatsheet"):
+            data["cheatsheet"] = json.loads(data["cheatsheet"])
+        if data.get("mindmap"):
+            data["mindmap"] = json.loads(data["mindmap"])
+        if data.get("flashcards"):
+            data["flashcards"] = json.loads(data["flashcards"])
+        return data
+
+def db_update_note(
+    note_id: str,
+    user_id: str,
+    title: str,
+    video_url: str,
+    markdown: str,
+    cheatsheet: Any = None,
+    mindmap: Any = None,
+    flashcards: Any = None,
+    ai_podcast_url: Optional[str] = None,
+    ai_debate_url: Optional[str] = None
+) -> dict:
+    if supabase_client:
+        row = {
+            "title": title,
+            "video_url": video_url or "",
+            "markdown": markdown,
+            "cheatsheet": json.dumps(cheatsheet) if cheatsheet else None,
+            "mindmap": json.dumps(mindmap) if mindmap else None,
+            "flashcards": json.dumps(flashcards) if flashcards else None,
+            "ai_podcast_url": ai_podcast_url,
+            "ai_debate_url": ai_debate_url,
+        }
+        supabase_client.table("notes").update(row).eq("id", note_id).eq("user_id", user_id).execute()
+        return {"message": "Note updated"}
+    else:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE notes 
+            SET title = ?, video_url = ?, markdown = ?, cheatsheet = ?, mindmap = ?, flashcards = ?, ai_podcast_url = ?, ai_debate_url = ?
+            WHERE id = ? AND user_id = ?
+        """, (
+            title,
+            video_url or "",
+            markdown,
+            json.dumps(cheatsheet) if cheatsheet else None,
+            json.dumps(mindmap) if mindmap else None,
+            json.dumps(flashcards) if flashcards else None,
+            ai_podcast_url,
+            ai_debate_url,
+            note_id,
+            user_id
+        ))
+        conn.commit()
+        conn.close()
+        return {"message": "Note updated"}
+
+def db_delete_note(note_id: str, user_id: str) -> dict:
+    if supabase_client:
+        supabase_client.table("notes").delete().eq("id", note_id).eq("user_id", user_id).execute()
+        return {"message": "Note deleted"}
+    else:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM notes WHERE id = ? AND user_id = ?", (note_id, user_id))
+        conn.commit()
+        conn.close()
+        return {"message": "Note deleted"}
+
 
 app = FastAPI(title="AI Lecture Notes Generator API")
 
@@ -280,7 +449,25 @@ def process_uploaded_file_and_generate_notes(media_path: str, language: str = "E
             except Exception as e:
                 print(f"Failed to delete file from Gemini: {e}")
 
-def run_process_job(job_id: str, language: str, url: Optional[str] = None, video_path: str = ""):
+def generate_ai_title(markdown_text: str) -> str:
+    try:
+        title_prompt = f"""
+Read the following lecture notes and generate a short, punchy, professional 3-6 word title that captures the core subject.
+Return strictly the title text ONLY. Do NOT use quotes, markdown formatting, prefixes, or punctuation at the end.
+
+Notes:
+{markdown_text[:3000]}
+"""
+        title = robust_gemini_call(contents=[title_prompt], is_json=False)
+        cleaned_title = title.strip().replace('"', '').replace("'", "").replace('#', '').strip()
+        if not cleaned_title or len(cleaned_title) > 80:
+            cleaned_title = "Untitled Lecture Note"
+        return cleaned_title
+    except Exception as e:
+        print(f"Error generating AI title: {e}")
+        return "Untitled Lecture Note"
+
+def run_process_job(job_id: str, language: str, user_id: str, url: Optional[str] = None, video_path: str = ""):
     try:
         if url:
             update_process_job(job_id, status="working", message="Connecting directly to YouTube via Google Gemini...")
@@ -290,6 +477,26 @@ def run_process_job(job_id: str, language: str, url: Optional[str] = None, video
             result = process_uploaded_file_and_generate_notes(video_path, language)
         else:
             raise ValueError("No valid video URL or file provided.")
+
+        markdown_output = result.get("markdown", "")
+        
+        # Smart AI Title Generation (Approach B) & Auto-Save
+        update_process_job(job_id, status="working", message="Generating smart title and saving notes...")
+        ai_title = generate_ai_title(markdown_output)
+        note_id = uuid.uuid4().hex
+        created_at = datetime.now().isoformat()
+        
+        db_save_note(
+            note_id=note_id,
+            title=ai_title,
+            video_url=url or "",
+            markdown=markdown_output,
+            user_id=user_id,
+            created_at=created_at
+        )
+
+        result["note_id"] = note_id
+        result["title"] = ai_title
 
         update_process_job(job_id, status="complete", message="Notes ready", result=result)
     except Exception as e:
@@ -327,7 +534,7 @@ async def process_lecture(
 
     worker = threading.Thread(
         target=run_process_job,
-        kwargs={"job_id": job_id, "language": language, "url": url, "video_path": video_path},
+        kwargs={"job_id": job_id, "language": language, "user_id": user_id, "url": url, "video_path": video_path},
         daemon=True
     )
     worker.start()
@@ -716,91 +923,50 @@ class NoteData(BaseModel):
 def save_note(note: NoteData, user_id: str = Depends(get_current_user_id)):
     note_id = uuid.uuid4().hex
     created_at = datetime.now().isoformat()
-    
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("""
-        INSERT INTO notes (id, title, video_url, markdown, cheatsheet, mindmap, flashcards, created_at, ai_podcast_url, ai_debate_url, user_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (
-        note_id,
-        note.title,
-        note.video_url or "",
-        note.markdown,
-        json.dumps(note.cheatsheet) if note.cheatsheet else None,
-        json.dumps(note.mindmap) if note.mindmap else None,
-        json.dumps(note.flashcards) if note.flashcards else None,
-        created_at,
-        note.ai_podcast_url,
-        note.ai_debate_url,
-        user_id
-    ))
-    conn.commit()
-    conn.close()
-    
-    return {"id": note_id, "message": "Note saved successfully"}
+    return db_save_note(
+        note_id=note_id,
+        title=note.title,
+        video_url=note.video_url or "",
+        markdown=note.markdown,
+        user_id=user_id,
+        created_at=created_at,
+        cheatsheet=note.cheatsheet,
+        mindmap=note.mindmap,
+        flashcards=note.flashcards,
+        ai_podcast_url=note.ai_podcast_url,
+        ai_debate_url=note.ai_debate_url
+    )
 
 @app.get("/notes")
 def get_notes(user_id: str = Depends(get_current_user_id)):
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, title, created_at, video_url FROM notes WHERE user_id = ? ORDER BY created_at DESC", (user_id,))
-    notes = [dict(row) for row in cursor.fetchall()]
-    conn.close()
+    notes = db_get_notes(user_id)
     return {"notes": notes}
 
 @app.get("/notes/{note_id}")
 def get_note(note_id: str, user_id: str = Depends(get_current_user_id)):
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM notes WHERE id = ? AND user_id = ?", (note_id, user_id))
-    row = cursor.fetchone()
-    conn.close()
-    
-    if not row:
+    note = db_get_note(note_id, user_id)
+    if not note:
         raise HTTPException(status_code=404, detail="Note not found")
-        
-    data = dict(row)
-    if data["cheatsheet"]: data["cheatsheet"] = json.loads(data["cheatsheet"])
-    if data["mindmap"]: data["mindmap"] = json.loads(data["mindmap"])
-    if data["flashcards"]: data["flashcards"] = json.loads(data["flashcards"])
-    
-    return data
+    return note
 
 @app.put("/notes/{note_id}")
 def update_note(note_id: str, note: NoteData, user_id: str = Depends(get_current_user_id)):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("""
-        UPDATE notes 
-        SET title = ?, video_url = ?, markdown = ?, cheatsheet = ?, mindmap = ?, flashcards = ?, ai_podcast_url = ?, ai_debate_url = ?
-        WHERE id = ? AND user_id = ?
-    """, (
-        note.title,
-        note.video_url or "",
-        note.markdown,
-        json.dumps(note.cheatsheet) if note.cheatsheet else None,
-        json.dumps(note.mindmap) if note.mindmap else None,
-        json.dumps(note.flashcards) if note.flashcards else None,
-        note.ai_podcast_url,
-        note.ai_debate_url,
-        note_id,
-        user_id
-    ))
-    conn.commit()
-    conn.close()
-    return {"message": "Note updated"}
+    return db_update_note(
+        note_id=note_id,
+        user_id=user_id,
+        title=note.title,
+        video_url=note.video_url or "",
+        markdown=note.markdown,
+        cheatsheet=note.cheatsheet,
+        mindmap=note.mindmap,
+        flashcards=note.flashcards,
+        ai_podcast_url=note.ai_podcast_url,
+        ai_debate_url=note.ai_debate_url
+    )
 
 @app.delete("/notes/{note_id}")
 def delete_note(note_id: str, user_id: str = Depends(get_current_user_id)):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM notes WHERE id = ? AND user_id = ?", (note_id, user_id))
-    conn.commit()
-    conn.close()
-    return {"message": "Note deleted"}
+    return db_delete_note(note_id, user_id)
 
 if __name__ == "__main__":
     import uvicorn

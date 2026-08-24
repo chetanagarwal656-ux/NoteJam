@@ -570,17 +570,18 @@ const NoteApp = () => {
       if (data.job_id) {
         data = await pollProcessJob(data.job_id, data.message);
       }
-      const parsedMarkdown = data.markdown.replace(/(?<!\]\()\[(\d{1,2}:\d{2}(?::\d{2})?)\](?!\()/g, '[$1](#$1)');
+      const parsedMarkdown = (data.markdown || "").replace(/(?<!\]\()\[(\d{1,2}:\d{2}(?::\d{2})?)\](?!\()/g, '[$1](#$1)');
       setMarkdown(parsedMarkdown);
       setCheatsheet([]);
       setMindmap(null);
       setFlashcards(null);
-      setCurrentNoteId(null);
-      setNoteTitle("");
+      setCurrentNoteId(data.note_id || null);
+      setNoteTitle(data.title || "");
       setActiveArtifact(null);
       setFullscreenArtifact(null);
       setIsArtifactConsoleOpen(true);
       setCurrentView("home");
+      void fetchNotes();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "An unexpected error occurred";
       setError(message === "Failed to fetch" ? "Could not reach the notes engine. Please restart the backend and try again." : message);
