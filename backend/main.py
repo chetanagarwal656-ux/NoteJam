@@ -236,6 +236,11 @@ def db_delete_note(note_id: str, user_id: str) -> dict:
         return {"message": "Note deleted"}
 
 
+def get_allowed_origins() -> list[str]:
+    raw_origins = os.getenv("ALLOWED_ORIGINS", "*")
+    origins = [origin.strip() for origin in raw_origins.split(",") if origin.strip()]
+    return origins or ["*"]
+
 app = FastAPI(title="AI Lecture Notes Generator API")
 
 allowed_origins = get_allowed_origins()
