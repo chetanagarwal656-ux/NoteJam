@@ -607,20 +607,16 @@ def is_token_limit_error(error: Exception) -> bool:
         or ("invalid_argument" in err_str and "token" in err_str)
     )
 
-def robust_gemini_call(contents, model='gemini-2.0-flash', is_json=False):
+def robust_gemini_call(contents, model='gemini-2.5-flash', is_json=False):
     """Call Gemini with dynamic key rotation and universal model fallback across pool."""
     num_clients = max(1, len(gemini_clients))
     max_attempts = max(4, num_clients * 2)
     last_error = None
-    candidate_models = [model, 'gemini-2.0-flash', 'gemini-1.5-flash']
-    seen_models = []
-    for m in candidate_models:
-        if m not in seen_models:
-            seen_models.append(m)
+    candidate_models = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']
 
     for attempt in range(max_attempts):
         client = get_next_gemini_client()
-        current_model = seen_models[attempt % len(seen_models)]
+        current_model = candidate_models[attempt % len(candidate_models)]
         try:
             kwargs = {'model': current_model, 'contents': contents}
             if is_json:
@@ -669,7 +665,7 @@ def call_best_text_model(prompt: str, is_json: bool = False) -> str:
     raise Exception("All AI engines (Groq, Gemini pool, OpenRouter) are currently busy. Please try again in a few moments.")
 
 def extract_youtube_transcript(url: str) -> Optional[str]:
-    """Fetch timestamped YouTube subtitles/transcript without downloading video."""
+    """Fetch timestamped YouTube subtitles/transcript across all youtube-transcript-api versions."""
     try:
         from youtube_transcript_api import YouTubeTranscriptApi
         pattern = r'(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:watch\?v=|embed\/|v\/|shorts\/|live\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})'
@@ -679,26 +675,44 @@ def extract_youtube_transcript(url: str) -> Optional[str]:
         video_id = match.group(1)
         
         pieces = None
-        # Attempt 1: Try common language preferences
+        
+        # 1. Try v1.x Instance API (Default in latest youtube-transcript-api)
         try:
-            pieces = YouTubeTranscriptApi.get_transcript(
-                video_id,
-                languages=['en', 'en-US', 'en-GB', 'en-IN', 'hi', 'hi-IN', 'auto']
-            )
-        except Exception:
-            # Attempt 2: Direct lookup for any available transcript
+            ytt = YouTubeTranscriptApi()
             try:
-                pieces = YouTubeTranscriptApi.get_transcript(video_id)
-            except Exception as inner_e:
-                print(f"Direct transcript fetch failed for {video_id}: {inner_e}")
+                pieces = ytt.fetch(video_id, languages=['en', 'en-US', 'en-GB', 'en-IN', 'hi', 'hi-IN'])
+            except Exception:
+                try:
+                    pieces = ytt.fetch(video_id)
+                except Exception:
+                    try:
+                        t_list = ytt.list(video_id)
+                        for t in t_list:
+                            pieces = t.fetch()
+                            break
+                    except Exception as list_err:
+                        print(f"ytt.list failed for {video_id}: {list_err}")
+        except Exception as v1_err:
+            print(f"Instance API attempt encountered: {v1_err}")
+            
+        # 2. Try legacy static API if instance didn't return pieces
+        if not pieces:
+            try:
+                if hasattr(YouTubeTranscriptApi, 'get_transcript'):
+                    try:
+                        pieces = YouTubeTranscriptApi.get_transcript(video_id, languages=['en', 'en-US', 'en-GB', 'en-IN', 'hi', 'hi-IN'])
+                    except Exception:
+                        pieces = YouTubeTranscriptApi.get_transcript(video_id)
+            except Exception as v0_err:
+                print(f"Legacy get_transcript fallback encountered: {v0_err}")
                     
         if pieces:
             formatted_lines = []
             for item in pieces:
-                start_sec = int(item.get('start', 0))
+                start_sec = int(item.get('start', 0) if isinstance(item, dict) else getattr(item, 'start', 0))
                 mm = start_sec // 60
                 ss = start_sec % 60
-                text = item.get('text', '').strip()
+                text = (item.get('text', '') if isinstance(item, dict) else getattr(item, 'text', '')).strip()
                 if text:
                     formatted_lines.append(f"[{mm:02d}:{ss:02d}] {text}")
             
