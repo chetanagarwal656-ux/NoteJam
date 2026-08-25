@@ -636,31 +636,31 @@ def robust_gemini_call(contents, model='gemini-2.5-flash', is_json=False):
 
 def call_best_text_model(prompt: str, is_json: bool = False) -> str:
     """Universal text generation with automatic multi-provider fallback:
-    1. Gemini Dynamic Key Pool
-    2. Groq (Llama 3.3 70B)
-    3. OpenRouter (DeepSeek / Llama)
+    1. Groq (Llama 3.3 70B) - Ultra-fast (1-2s), preserves 100% of Gemini video quota
+    2. Gemini Dynamic Key Pool (4+ accounts) - High-intelligence fallback
+    3. OpenRouter (DeepSeek / Llama) - Universal safety net
     """
-    # 1. Try Gemini Key Pool
-    try:
-        return robust_gemini_call(contents=[prompt], is_json=is_json)
-    except Exception as gemini_err:
-        print(f"Gemini text pool error ({gemini_err}). Trying Groq LPU...")
-    
-    # 2. Try Groq
+    # 1. Primary: Try Groq (Llama 3.3 70B) for ultra-fast text inference
     if groq_client:
         try:
             return call_groq_text(prompt, is_json=is_json)
         except Exception as groq_err:
-            print(f"Groq call failed ({groq_err}). Trying OpenRouter...")
+            print(f"Groq primary text call failed ({groq_err}). Falling back to Gemini Key Pool...")
     
-    # 3. Try OpenRouter
+    # 2. First Fallback: Try Gemini Key Pool
+    try:
+        return robust_gemini_call(contents=[prompt], is_json=is_json)
+    except Exception as gemini_err:
+        print(f"Gemini text pool fallback failed ({gemini_err}). Trying OpenRouter...")
+    
+    # 3. Second Fallback: Try OpenRouter (DeepSeek / Llama)
     if OPENROUTER_API_KEY:
         try:
             return call_openrouter_text(prompt, is_json=is_json)
         except Exception as openrouter_err:
             print(f"OpenRouter call failed ({openrouter_err})")
             
-    raise Exception("All AI engines (Gemini pool, Groq, OpenRouter) are currently busy. Please try again in a few moments.")
+    raise Exception("All AI engines (Groq, Gemini pool, OpenRouter) are currently busy. Please try again in a few moments.")
 
 def extract_youtube_transcript(url: str) -> Optional[str]:
     """Fetch timestamped YouTube subtitles/transcript without downloading video."""
