@@ -607,18 +607,19 @@ def is_token_limit_error(error: Exception) -> bool:
         or ("invalid_argument" in err_str and "token" in err_str)
     )
 
-def robust_gemini_call(contents, model='gemini-2.5-flash', is_json=False):
-    """Call Gemini with dynamic key rotation and universal model fallback across pool."""
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip()
+
+def robust_gemini_call(contents, model=None, is_json=False):
+    """Call Gemini with dynamic key rotation across all available clients in the pool."""
+    active_model = model or GEMINI_MODEL
     num_clients = max(1, len(gemini_clients))
     max_attempts = max(4, num_clients * 2)
     last_error = None
-    candidate_models = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']
 
     for attempt in range(max_attempts):
         client = get_next_gemini_client()
-        current_model = candidate_models[attempt % len(candidate_models)]
         try:
-            kwargs = {'model': current_model, 'contents': contents}
+            kwargs = {'model': active_model, 'contents': contents}
             if is_json:
                 kwargs['config'] = genai.types.GenerateContentConfig(response_mime_type="application/json")
             response = client.models.generate_content(**kwargs)
@@ -631,7 +632,7 @@ def robust_gemini_call(contents, model='gemini-2.5-flash', is_json=False):
             if is_token_limit_error(e):
                 raise TokenLimitExceeded("This lecture is too long for direct video processing.") from e
             
-            print(f"Gemini key attempt {attempt+1}/{max_attempts} ({current_model}) hit: {e}. Rotating to next key...")
+            print(f"Gemini key attempt {attempt+1}/{max_attempts} ({active_model}) hit: {e}. Rotating to next key...")
             time.sleep(0.3)
 
     raise last_error or Exception("All Gemini API keys in pool were exhausted.")
