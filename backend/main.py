@@ -448,12 +448,12 @@ gemini_clients: list[genai.Client] = []
 if gemini_keys:
     for k in gemini_keys:
         try:
-            gemini_clients.append(genai.Client(api_key=k, http_options={'timeout': 30000}))
+            gemini_clients.append(genai.Client(api_key=k, http_options={'timeout': 300000}))
         except Exception as e:
             print(f"Error initializing Gemini client for key: {e}")
 
 if not gemini_clients:
-    gemini_clients = [genai.Client(http_options={'timeout': 30000})]
+    gemini_clients = [genai.Client(http_options={'timeout': 300000})]
 
 print(f"Initialized Gemini Key Pool with {len(gemini_clients)} active client(s).")
 
