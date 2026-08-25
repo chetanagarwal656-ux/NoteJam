@@ -448,12 +448,12 @@ gemini_clients: list[genai.Client] = []
 if gemini_keys:
     for k in gemini_keys:
         try:
-            gemini_clients.append(genai.Client(api_key=k, http_options={'timeout': 3600000}))
+            gemini_clients.append(genai.Client(api_key=k, http_options={'timeout': 30000}))
         except Exception as e:
             print(f"Error initializing Gemini client for key: {e}")
 
 if not gemini_clients:
-    gemini_clients = [genai.Client(http_options={'timeout': 3600000})]
+    gemini_clients = [genai.Client(http_options={'timeout': 30000})]
 
 print(f"Initialized Gemini Key Pool with {len(gemini_clients)} active client(s).")
 
@@ -607,16 +607,22 @@ def is_token_limit_error(error: Exception) -> bool:
         or ("invalid_argument" in err_str and "token" in err_str)
     )
 
-def robust_gemini_call(contents, model='gemini-2.5-flash', is_json=False):
-    """Call Gemini with dynamic key rotation across all available clients in the pool."""
+def robust_gemini_call(contents, model='gemini-2.0-flash', is_json=False):
+    """Call Gemini with dynamic key rotation and universal model fallback across pool."""
     num_clients = max(1, len(gemini_clients))
-    max_attempts = max(3, num_clients * 2)
+    max_attempts = max(4, num_clients * 2)
     last_error = None
+    candidate_models = [model, 'gemini-2.0-flash', 'gemini-1.5-flash']
+    seen_models = []
+    for m in candidate_models:
+        if m not in seen_models:
+            seen_models.append(m)
 
     for attempt in range(max_attempts):
         client = get_next_gemini_client()
+        current_model = seen_models[attempt % len(seen_models)]
         try:
-            kwargs = {'model': model, 'contents': contents}
+            kwargs = {'model': current_model, 'contents': contents}
             if is_json:
                 kwargs['config'] = genai.types.GenerateContentConfig(response_mime_type="application/json")
             response = client.models.generate_content(**kwargs)
@@ -629,8 +635,8 @@ def robust_gemini_call(contents, model='gemini-2.5-flash', is_json=False):
             if is_token_limit_error(e):
                 raise TokenLimitExceeded("This lecture is too long for direct video processing.") from e
             
-            print(f"Gemini key attempt {attempt+1}/{max_attempts} hit: {e}. Rotating to next key...")
-            time.sleep(0.5)
+            print(f"Gemini key attempt {attempt+1}/{max_attempts} ({current_model}) hit: {e}. Rotating to next key...")
+            time.sleep(0.3)
 
     raise last_error or Exception("All Gemini API keys in pool were exhausted.")
 
@@ -672,24 +678,21 @@ def extract_youtube_transcript(url: str) -> Optional[str]:
             return None
         video_id = match.group(1)
         
-        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-        transcript = None
-        
-        # Priority 1: User uploaded English/Hindi
+        pieces = None
+        # Attempt 1: Try common language preferences
         try:
-            transcript = transcript_list.find_transcript(['en', 'en-US', 'en-GB', 'en-IN', 'hi', 'hi-IN'])
+            pieces = YouTubeTranscriptApi.get_transcript(
+                video_id,
+                languages=['en', 'en-US', 'en-GB', 'en-IN', 'hi', 'hi-IN', 'auto']
+            )
         except Exception:
-            # Priority 2: Auto-generated English/Hindi
+            # Attempt 2: Direct lookup for any available transcript
             try:
-                transcript = transcript_list.find_generated_transcript(['en', 'hi'])
-            except Exception:
-                # Priority 3: Any available transcript
-                for t in transcript_list:
-                    transcript = t
-                    break
+                pieces = YouTubeTranscriptApi.get_transcript(video_id)
+            except Exception as inner_e:
+                print(f"Direct transcript fetch failed for {video_id}: {inner_e}")
                     
-        if transcript:
-            pieces = transcript.fetch()
+        if pieces:
             formatted_lines = []
             for item in pieces:
                 start_sec = int(item.get('start', 0))
@@ -698,7 +701,11 @@ def extract_youtube_transcript(url: str) -> Optional[str]:
                 text = item.get('text', '').strip()
                 if text:
                     formatted_lines.append(f"[{mm:02d}:{ss:02d}] {text}")
-            return "\n".join(formatted_lines)
+            
+            raw_transcript = "\n".join(formatted_lines)
+            if len(raw_transcript) > 350000:
+                raw_transcript = raw_transcript[:350000] + "\n\n[Transcript truncated for length]"
+            return raw_transcript
     except Exception as e:
         print(f"Could not extract transcript for {url}: {e}")
         return None
