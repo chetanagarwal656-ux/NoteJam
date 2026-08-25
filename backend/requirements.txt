@@ -6,3 +6,6 @@ google-genai
 edge-tts
 PyJWT[crypto]
 supabase
+youtube-transcript-api
+groq
+httpx

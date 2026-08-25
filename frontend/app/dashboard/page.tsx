@@ -689,24 +689,43 @@ const NoteApp = () => {
 
   const pollProcessJob = async (jobId: string, firstMessage?: string) => {
     setProcessingMessage(firstMessage || "Preparing your lecture...");
+    let consecutiveNetworkErrors = 0;
 
     for (let attempt = 0; attempt < 720; attempt += 1) {
-      await new Promise((resolve) => window.setTimeout(resolve, 5000));
-      const response = await authFetch(`${API_BASE}/process/${jobId}`);
-      if (!response.ok) {
-        const errData = await response.json();
-        throw new Error(errData.detail || "Could not check note generation progress.");
-      }
+      await new Promise((resolve) => window.setTimeout(resolve, 4000));
+      
+      try {
+        const response = await authFetch(`${API_BASE}/process/${jobId}`);
+        if (!response.ok) {
+          const errData = await response.json().catch(() => ({}));
+          throw new Error(errData.detail || "Could not check note generation progress.");
+        }
 
-      const data = await response.json();
-      setProcessingMessage(data.message || "Generating your notes...");
+        consecutiveNetworkErrors = 0;
+        const data = await response.json();
+        setProcessingMessage(data.message || "Generating your notes...");
 
-      if (data.status === "complete") {
-        return data.result;
-      }
+        if (data.status === "complete") {
+          return data.result;
+        }
 
-      if (data.status === "failed") {
-        throw new Error(data.message || "Note generation failed.");
+        if (data.status === "failed") {
+          throw new Error(data.message || "Note generation failed.");
+        }
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : "";
+        if (msg && msg !== "Failed to fetch" && !msg.includes("NetworkError")) {
+          if (msg.includes("failed") || msg.includes("too long") || msg.includes("rate limit") || msg.includes("quota") || msg.includes("not found")) {
+            throw err;
+          }
+        }
+
+        consecutiveNetworkErrors += 1;
+        console.warn(`Transient polling glitch (retry ${consecutiveNetworkErrors}/6):`, err);
+        if (consecutiveNetworkErrors >= 6) {
+          throw err;
+        }
+        await new Promise((resolve) => window.setTimeout(resolve, 2000));
       }
     }
 

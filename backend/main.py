@@ -421,11 +421,115 @@ SILENCE_SENTENCE_END = get_silence_bytes(350)
 SILENCE_SPEAKER_TURN = get_silence_bytes(550)
 SILENCE_EXCLAMATION = get_silence_bytes(250)
 
-client = genai.Client(http_options={'timeout': 3600000})
+# --- Multi-Engine AI Setup: Gemini Pool + Groq + OpenRouter + Transcript ---
+
+def get_gemini_api_keys() -> list[str]:
+    keys = []
+    # 1. Check GEMINI_API_KEYS (comma-separated)
+    raw_keys = os.getenv("GEMINI_API_KEYS", "")
+    if raw_keys:
+        for k in raw_keys.split(","):
+            cleaned = k.strip()
+            if cleaned and cleaned not in keys:
+                keys.append(cleaned)
+    # 2. Check GEMINI_API_KEY_1 through GEMINI_API_KEY_10
+    for i in range(1, 11):
+        k = os.getenv(f"GEMINI_API_KEY_{i}", "").strip()
+        if k and k not in keys:
+            keys.append(k)
+    # 3. Check legacy GEMINI_API_KEY
+    legacy = os.getenv("GEMINI_API_KEY", "").strip()
+    if legacy and legacy not in keys:
+        keys.append(legacy)
+    return keys
+
+gemini_keys = get_gemini_api_keys()
+gemini_clients: list[genai.Client] = []
+if gemini_keys:
+    for k in gemini_keys:
+        try:
+            gemini_clients.append(genai.Client(api_key=k, http_options={'timeout': 3600000}))
+        except Exception as e:
+            print(f"Error initializing Gemini client for key: {e}")
+
+if not gemini_clients:
+    gemini_clients = [genai.Client(http_options={'timeout': 3600000})]
+
+print(f"Initialized Gemini Key Pool with {len(gemini_clients)} active client(s).")
+
+gemini_client_index = 0
+gemini_pool_lock = threading.Lock()
+
+def get_next_gemini_client() -> genai.Client:
+    global gemini_client_index
+    with gemini_pool_lock:
+        client = gemini_clients[gemini_client_index % len(gemini_clients)]
+        gemini_client_index = (gemini_client_index + 1) % len(gemini_clients)
+        return client
+
+# --- Groq & OpenRouter External LLMs ---
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
+
+groq_client = None
+if GROQ_API_KEY:
+    try:
+        from groq import Groq
+        groq_client = Groq(api_key=GROQ_API_KEY)
+        print("Groq client initialized successfully.")
+    except Exception as e:
+        print(f"Error initializing Groq client: {e}")
+
+def call_groq_text(prompt: str, is_json: bool = False, model: str = "llama-3.3-70b-versatile") -> str:
+    if not groq_client:
+        raise ValueError("Groq client not configured")
+    messages = [{"role": "user", "content": prompt}]
+    params: dict[str, Any] = {
+        "model": model,
+        "messages": messages,
+        "temperature": 0.2,
+    }
+    if is_json:
+        params["response_format"] = {"type": "json_object"}
+    chat_completion = groq_client.chat.completions.create(**params)
+    content = chat_completion.choices[0].message.content
+    if not content:
+        raise ValueError("Groq returned empty response")
+    return content
+
+def call_openrouter_text(prompt: str, is_json: bool = False, model: str = "deepseek/deepseek-chat:free") -> str:
+    if not OPENROUTER_API_KEY:
+        raise ValueError("OpenRouter API key not configured")
+    import httpx
+    headers = {
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "HTTP-Referer": "https://notejam.vercel.app",
+        "X-Title": "NoteJam AI",
+        "Content-Type": "application/json"
+    }
+    payload: dict[str, Any] = {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.2
+    }
+    if is_json:
+        payload["response_format"] = {"type": "json_object"}
+    
+    with httpx.Client(timeout=120.0) as client:
+        resp = client.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload)
+        if resp.status_code != 200:
+            print(f"OpenRouter primary model {model} returned {resp.status_code}. Retrying with llama-3.3-70b...")
+            payload["model"] = "meta-llama/llama-3.3-70b-instruct:free"
+            resp = client.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload)
+        resp.raise_for_status()
+        data = resp.json()
+        content = data["choices"][0]["message"]["content"]
+        if not content:
+            raise ValueError("OpenRouter returned empty response")
+        return content
 
 def get_public_base_url() -> str:
     return os.getenv("PUBLIC_BASE_URL", "http://localhost:8000").rstrip("/")
-
 
 def parse_json_response(raw_text: str):
     cleaned = raw_text.strip()
@@ -436,7 +540,6 @@ def parse_json_response(raw_text: str):
         cleaned = re.sub(r"^```\s*", "", cleaned)
         cleaned = re.sub(r"\s*```$", "", cleaned)
 
-    # Attempt to fix invalid JSON escapes (e.g. \- or \.) often produced by LLMs
     cleaned = re.sub(r'\\([^"\\/bfnrtu])', r'\1', cleaned)
 
     try:
@@ -505,8 +608,13 @@ def is_token_limit_error(error: Exception) -> bool:
     )
 
 def robust_gemini_call(contents, model='gemini-2.5-flash', is_json=False):
-    max_retries = 3
-    for attempt in range(max_retries):
+    """Call Gemini with dynamic key rotation across all available clients in the pool."""
+    num_clients = max(1, len(gemini_clients))
+    max_attempts = max(3, num_clients * 2)
+    last_error = None
+
+    for attempt in range(max_attempts):
+        client = get_next_gemini_client()
         try:
             kwargs = {'model': model, 'contents': contents}
             if is_json:
@@ -516,20 +624,85 @@ def robust_gemini_call(contents, model='gemini-2.5-flash', is_json=False):
                 raise ValueError("Model returned empty response.")
             return response.text
         except Exception as e:
+            last_error = e
             err_str = str(e).lower()
             if is_token_limit_error(e):
-                raise TokenLimitExceeded(
-                    "This lecture is too long to process. Please try a shorter lecture segment."
-                ) from e
-            if "429" in err_str or "503" in err_str or "quota" in err_str:
-                if attempt < max_retries - 1:
-                    print(f"API Rate limit/Overload hit. Retrying in 65 seconds... (Attempt {attempt+1}/{max_retries})")
-                    time.sleep(65)
-                else:
-                    raise Exception("You have hit the Google Gemini API rate limit or quota limit. Please wait a few minutes and try again.")
-            else:
-                raise e
-    raise Exception("Failed to generate content after retries.")
+                raise TokenLimitExceeded("This lecture is too long for direct video processing.") from e
+            
+            print(f"Gemini key attempt {attempt+1}/{max_attempts} hit: {e}. Rotating to next key...")
+            time.sleep(0.5)
+
+    raise last_error or Exception("All Gemini API keys in pool were exhausted.")
+
+def call_best_text_model(prompt: str, is_json: bool = False) -> str:
+    """Universal text generation with automatic multi-provider fallback:
+    1. Gemini Dynamic Key Pool
+    2. Groq (Llama 3.3 70B)
+    3. OpenRouter (DeepSeek / Llama)
+    """
+    # 1. Try Gemini Key Pool
+    try:
+        return robust_gemini_call(contents=[prompt], is_json=is_json)
+    except Exception as gemini_err:
+        print(f"Gemini text pool error ({gemini_err}). Trying Groq LPU...")
+    
+    # 2. Try Groq
+    if groq_client:
+        try:
+            return call_groq_text(prompt, is_json=is_json)
+        except Exception as groq_err:
+            print(f"Groq call failed ({groq_err}). Trying OpenRouter...")
+    
+    # 3. Try OpenRouter
+    if OPENROUTER_API_KEY:
+        try:
+            return call_openrouter_text(prompt, is_json=is_json)
+        except Exception as openrouter_err:
+            print(f"OpenRouter call failed ({openrouter_err})")
+            
+    raise Exception("All AI engines (Gemini pool, Groq, OpenRouter) are currently busy. Please try again in a few moments.")
+
+def extract_youtube_transcript(url: str) -> Optional[str]:
+    """Fetch timestamped YouTube subtitles/transcript without downloading video."""
+    try:
+        from youtube_transcript_api import YouTubeTranscriptApi
+        pattern = r'(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:watch\?v=|embed\/|v\/|shorts\/|live\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})'
+        match = re.search(pattern, url)
+        if not match:
+            return None
+        video_id = match.group(1)
+        
+        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+        transcript = None
+        
+        # Priority 1: User uploaded English/Hindi
+        try:
+            transcript = transcript_list.find_transcript(['en', 'en-US', 'en-GB', 'en-IN', 'hi', 'hi-IN'])
+        except Exception:
+            # Priority 2: Auto-generated English/Hindi
+            try:
+                transcript = transcript_list.find_generated_transcript(['en', 'hi'])
+            except Exception:
+                # Priority 3: Any available transcript
+                for t in transcript_list:
+                    transcript = t
+                    break
+                    
+        if transcript:
+            pieces = transcript.fetch()
+            formatted_lines = []
+            for item in pieces:
+                start_sec = int(item.get('start', 0))
+                mm = start_sec // 60
+                ss = start_sec % 60
+                text = item.get('text', '').strip()
+                if text:
+                    formatted_lines.append(f"[{mm:02d}:{ss:02d}] {text}")
+            return "\n".join(formatted_lines)
+    except Exception as e:
+        print(f"Could not extract transcript for {url}: {e}")
+        return None
+    return None
 
 def normalize_youtube_url(url: str) -> str:
     """Normalize any YouTube URL (live, shorts, embed, youtu.be, query params) 
@@ -542,23 +715,44 @@ def normalize_youtube_url(url: str) -> str:
         return f"https://www.youtube.com/watch?v={video_id}"
     return cleaned
 
-def process_youtube_url_directly(url: str, language: str = "English") -> dict:
-    """Process a YouTube URL by passing it directly to Gemini via Part.from_uri().
-    Google's infrastructure fetches the video natively — no server-side download needed."""
+def process_youtube_with_multi_tier(url: str, language: str, job_id: str) -> dict:
     canonical_url = normalize_youtube_url(url)
-    print(f"Processing YouTube URL directly via Gemini: {canonical_url} (raw: {url})")
-    markdown_output = robust_gemini_call(
-        contents=[
-            genai.types.Part.from_uri(file_uri=canonical_url, mime_type="video/mp4"),
-            SYSTEM_PROMPT.format(language=language)
-        ],
-        is_json=False
-    )
+    
+    # Tier 1: Gemini Native Video Engine across Key Pool
+    try:
+        update_process_job(job_id, status="working", message="Analyzing video directly via Google Gemini...")
+        print(f"Tier 1: Trying Gemini Native Video Engine for {canonical_url}")
+        markdown_output = robust_gemini_call(
+            contents=[
+                genai.types.Part.from_uri(file_uri=canonical_url, mime_type="video/mp4"),
+                SYSTEM_PROMPT.format(language=language)
+            ],
+            is_json=False
+        )
+        return {"markdown": markdown_output}
+    except Exception as e:
+        print(f"Tier 1 Video Engine encountered error ({e}). Seamlessly switching to Transcript Engine...")
+
+    # Tier 2 & 3: Transcript Engine (98% Token Reduction)
+    update_process_job(job_id, status="working", message="Extracting lecture transcript for fast generation...")
+    transcript = extract_youtube_transcript(url)
+    if not transcript:
+        raise Exception("Could not process video with Gemini and no transcript was found for this video. Please upload the video file directly.")
+
+    update_process_job(job_id, status="working", message="Generating comprehensive study notes from lecture transcript...")
+    transcript_prompt = f"""
+{SYSTEM_PROMPT.format(language=language)}
+
+LECTURE TRANSCRIPT (WITH TIMESTAMPS):
+{transcript}
+"""
+    markdown_output = call_best_text_model(transcript_prompt, is_json=False)
     return {"markdown": markdown_output}
 
 def process_uploaded_file_and_generate_notes(media_path: str, language: str = "English") -> dict:
     """Process an uploaded video/audio file by uploading it to the Gemini File API."""
     print("Uploading media to Gemini...")
+    client = get_next_gemini_client()
     uploaded_file = None
     try:
         uploaded_file = client.files.upload(file=media_path)
@@ -598,7 +792,7 @@ Return strictly the title text ONLY. Do NOT use quotes, markdown formatting, pre
 Notes:
 {markdown_text[:3000]}
 """
-        title = robust_gemini_call(contents=[title_prompt], is_json=False)
+        title = call_best_text_model(title_prompt, is_json=False)
         cleaned_title = title.strip().replace('"', '').replace("'", "").replace('#', '').strip()
         if not cleaned_title or len(cleaned_title) > 80:
             cleaned_title = "Untitled Lecture Note"
@@ -610,8 +804,7 @@ Notes:
 def run_process_job(job_id: str, language: str, user_id: str, url: Optional[str] = None, video_path: str = ""):
     try:
         if url:
-            update_process_job(job_id, status="working", message="Connecting directly to YouTube via Google Gemini...")
-            result = process_youtube_url_directly(url, language)
+            result = process_youtube_with_multi_tier(url, language, job_id)
         elif video_path and os.path.exists(video_path):
             update_process_job(job_id, status="working", message="Uploading and analyzing your lecture video...")
             result = process_uploaded_file_and_generate_notes(video_path, language)
@@ -620,7 +813,7 @@ def run_process_job(job_id: str, language: str, user_id: str, url: Optional[str]
 
         markdown_output = result.get("markdown", "")
         
-        # Smart AI Title Generation (Approach B) & Auto-Save
+        # Smart AI Title Generation & Auto-Save
         update_process_job(job_id, status="working", message="Generating smart title and saving notes...")
         ai_title = generate_ai_title(markdown_output)
         note_id = uuid.uuid4().hex
@@ -641,12 +834,7 @@ def run_process_job(job_id: str, language: str, user_id: str, url: Optional[str]
         update_process_job(job_id, status="complete", message="Notes ready", result=result)
     except Exception as e:
         print(f"Error processing video job {job_id}: {e}")
-        if is_token_limit_error(e):
-            message = "This lecture is too long to process. Please try a shorter lecture segment."
-        elif "Google Gemini API rate limit or quota limit" in str(e):
-            message = str(e)
-        else:
-            message = "NoteJam could not process this lecture. Please try another link or upload the video file directly."
+        message = str(e) if ("rate limit" in str(e).lower() or "transcript" in str(e).lower()) else "NoteJam could not process this lecture. Please try another link or upload the video file directly."
         update_process_job(job_id, status="failed", message=message)
     finally:
         if video_path and os.path.exists(video_path):
@@ -705,7 +893,7 @@ def create_flashcards(req: FlashcardRequest, user_id: str = Depends(get_current_
     {req.markdown}
     """
     try:
-        raw_text = robust_gemini_call(contents=[prompt], is_json=True)
+        raw_text = call_best_text_model(prompt=prompt, is_json=True)
         flashcards = parse_json_response(raw_text)
         return {"flashcards": flashcards}
     except Exception as e:
@@ -727,7 +915,7 @@ def create_cheatsheet(req: DocumentRequest, user_id: str = Depends(get_current_u
     {req.markdown}
     """
     try:
-        raw_text = robust_gemini_call(contents=[prompt], is_json=True)
+        raw_text = call_best_text_model(prompt=prompt, is_json=True)
         return {"cheatsheet": parse_json_response(raw_text)}
     except Exception as e:
         print(f"Error generating cheatsheet: {e}")
@@ -810,7 +998,7 @@ def create_mindmap(req: DocumentRequest, user_id: str = Depends(get_current_user
     {req.markdown}
     """
     try:
-        raw_text = robust_gemini_call(contents=[prompt], is_json=True)
+        raw_text = call_best_text_model(prompt=prompt, is_json=True)
         data = parse_json_response(raw_text)
         data["version"] = "revision-sheet-v2"
         return {"mindmap": data}
@@ -833,7 +1021,7 @@ def simplify_text(req: SimplifyRequest, user_id: str = Depends(get_current_user_
     "{req.text}"
     """
     try:
-        raw_text = robust_gemini_call(contents=[prompt], is_json=False)
+        raw_text = call_best_text_model(prompt=prompt, is_json=False)
         return {"explanation": raw_text.strip()}
     except Exception as e:
         print(f"Error simplifying text: {e}")
@@ -871,7 +1059,7 @@ def chat_lecture(req: ChatRequest, user_id: str = Depends(get_current_user_id)):
     {req.question}
     """
     try:
-        raw_text = robust_gemini_call(contents=[prompt], is_json=False)
+        raw_text = call_best_text_model(prompt=prompt, is_json=False)
         return {"answer": raw_text.strip()}
     except Exception as e:
         print(f"Error in chat: {e}")
@@ -924,23 +1112,7 @@ Example:
 Lecture Notes:
 {req.markdown}
 """
-        # Retry mechanism for Gemini Rate Limits and 503s
-        max_retries = 3
-        raw_text = None
-        for attempt in range(max_retries):
-            try:
-                raw_text = robust_gemini_call(contents=[prompt], is_json=True)
-                break
-            except Exception as e:
-                error_str = str(e)
-                if ("429" in error_str or "503" in error_str) and attempt < max_retries - 1:
-                    import time
-                    print(f"Gemini API issue ({'503' if '503' in error_str else '429'}). Waiting 10s...")
-                    time.sleep(10)
-                else:
-                    print(f"Error calling Gemini: {e}")
-                    raise ValueError("AI failed to output a valid JSON script. Please try again.")
-                    
+        raw_text = call_best_text_model(prompt=prompt, is_json=True)
         if not raw_text:
             raise ValueError("Model failed to generate a response.")
             
