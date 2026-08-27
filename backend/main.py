@@ -540,7 +540,7 @@ def parse_json_response(raw_text: str):
         cleaned = re.sub(r"^```\s*", "", cleaned)
         cleaned = re.sub(r"\s*```$", "", cleaned)
 
-    cleaned = re.sub(r'\\([^"\\/bfnrtu])', r'\1', cleaned)
+    cleaned = re.sub(r'\\([^"\\/bfnrtu])', r'\\\\\1', cleaned)
 
     try:
         return json.loads(cleaned)
@@ -907,6 +907,7 @@ def create_flashcards(req: FlashcardRequest, user_id: str = Depends(get_current_
     Based on the following lecture notes, create a highly effective set of spaced-repetition flashcards.
     Depending on the depth and length of the notes, generate anywhere from 10 to 50 flashcards (10 being the minimum, 50 being the maximum).
     CRITICAL: For math, equations, vectors, or superscripts, YOU MUST use LaTeX with dollar signs (e.g. $R^n$, $A^T$, $E=mc^2$). Do NOT use raw carets (^) or backticks for math.
+    CRITICAL JSON RULE: You MUST properly escape all backslashes in LaTeX for valid JSON. For example, write \\\\mathbb instead of \\mathbb, and \\\\cap instead of \\cap. Failure to double-escape backslashes will break the parser.
 
     Output a strictly valid JSON array of objects, where each object has exactly three keys: "question", "answer", and "explanation".
     The "explanation" should be a brief 1-2 sentence clarification of WHY the answer is correct, to help the student understand if they get confused.
@@ -930,6 +931,7 @@ def create_cheatsheet(req: DocumentRequest, user_id: str = Depends(get_current_u
     prompt = f"""
     Based on the following lecture notes, extract 3-7 critical formulas, equations, or short key definitions.
     CRITICAL: For math, equations, vectors, or superscripts, YOU MUST use LaTeX with dollar signs (e.g. $R^n$, $A^T$, $E=mc^2$). Do NOT use raw carets (^) or backticks for math.
+    CRITICAL JSON RULE: You MUST properly escape all backslashes in LaTeX for valid JSON. For example, write \\\\mathbb instead of \\mathbb, and \\\\cap instead of \\cap. Failure to double-escape backslashes will break the parser.
     Return ONLY a valid JSON array of strings. No markdown formatting outside the JSON array.
     Example: ["E=mc^2: Energy equals mass times the speed of light squared.", "Newton's First Law: An object at rest stays at rest."]
     
@@ -1008,6 +1010,7 @@ def create_mindmap(req: DocumentRequest, user_id: str = Depends(get_current_user
        - NEVER truncate mid-thought or write fragmented labels like "Program Execution (Crucial)".
        - Maximum 48 characters per bullet. Summarize naturally to fit this limit. DO NOT abruptly truncate sentences.
        - CRITICAL: If the text contains math, equations, vectors, or superscripts, YOU MUST use inline LaTeX with dollar signs (e.g. $R^n$, $A^T$, $E=mc^2$). Do NOT use raw carets (^) or backticks for math.
+       - CRITICAL JSON RULE: You MUST properly escape all backslashes in LaTeX for valid JSON. For example, write \\\\mathbb instead of \\mathbb, and \\\\cap instead of \\cap.
        - 2 to 3 bullets per section.
     4. Formulas, Examples & Takeaways:
        - Extract standalone formulas and practical examples into their dedicated arrays with `relatedSection` when taught in notes.
