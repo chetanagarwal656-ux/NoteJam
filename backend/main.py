@@ -480,7 +480,7 @@ if GROQ_API_KEY:
     except Exception as e:
         print(f"Error initializing Groq client: {e}")
 
-def call_groq_text(prompt: str, is_json: bool = False, model: str = "llama-3.3-70b-versatile") -> str:
+def call_groq_text(prompt: str, is_json: bool = False, model: str = "llama3-8b-8192") -> str:
     if not groq_client:
         raise ValueError("Groq client not configured")
     messages = [{"role": "user", "content": prompt}]
@@ -497,7 +497,7 @@ def call_groq_text(prompt: str, is_json: bool = False, model: str = "llama-3.3-7
         raise ValueError("Groq returned empty response")
     return content
 
-def call_openrouter_text(prompt: str, is_json: bool = False, model: str = "deepseek/deepseek-chat:free") -> str:
+def call_openrouter_text(prompt: str, is_json: bool = False, model: str = "openrouter/free") -> str:
     if not OPENROUTER_API_KEY:
         raise ValueError("OpenRouter API key not configured")
     import httpx
@@ -518,8 +518,8 @@ def call_openrouter_text(prompt: str, is_json: bool = False, model: str = "deeps
     with httpx.Client(timeout=120.0) as client:
         resp = client.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload)
         if resp.status_code != 200:
-            print(f"OpenRouter primary model {model} returned {resp.status_code}. Retrying with llama-3.3-70b...")
-            payload["model"] = "meta-llama/llama-3.3-70b-instruct:free"
+            print(f"OpenRouter primary model {model} returned {resp.status_code}. Retrying with llama-3-8b...")
+            payload["model"] = "meta-llama/llama-3-8b-instruct:free"
             resp = client.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload)
         resp.raise_for_status()
         data = resp.json()
@@ -607,7 +607,7 @@ def is_token_limit_error(error: Exception) -> bool:
         or ("invalid_argument" in err_str and "token" in err_str)
     )
 
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip()
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash").strip()
 
 def robust_gemini_call(contents, model=None, is_json=False):
     """Call Gemini with dynamic key rotation across all available clients in the pool."""

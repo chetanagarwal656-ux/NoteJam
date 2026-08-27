@@ -146,7 +146,7 @@ Note_Jam/
                      ┌─────────────────┴────┐   ┌─────┴──────────┐   ┌┴────────────────────┐
                      ▼                      ▼   ▼                ▼   ▼                     ▼
               Google GenAI SDK               FFmpeg Binary           Edge-TTS           yt-dlp
-             (gemini-2.5-flash)           (system ffmpeg)         (Neural Audio)    (Gemini URI Fetch)
+             (gemini-3.6-flash)           (system ffmpeg)         (Neural Audio)    (Gemini URI Fetch)
              - Structured Notes           - Frame Extraction      - Hindi/English   - YouTube / Web
              - Mind Map Schema            - 25m Video Chunking      Dual Hosts        Extraction
              - Spaced Flashcards          - Audio Track Demux       Chetan/Anamika
@@ -183,7 +183,7 @@ Note_Jam/
 
 ### Backend (`backend/main.py`)
 - `init_db()`: Initializes table and ensures schema migrations (`ai_podcast_url`, `ai_debate_url`).
-- `robust_gemini_call(contents, model='gemini-2.5-flash', is_json=False)`: Wraps Gemini calls with 3 retries, handles 429/503 rate limits with a 65-second sleep, and intercepts token limit errors.
+- `robust_gemini_call(contents, model='gemini-3.6-flash', is_json=False)`: Wraps Gemini calls with 3 retries, handles 429/503 rate limits with a 65-second sleep, and intercepts token limit errors.
 - `process_youtube_url_directly(url)`: Bypasses server-side downloads entirely, handing YouTube links straight to Google.
 - `extract_frame(video_path, timestamp_str, output_filename)`: Runs FFmpeg seek `-ss` to extract a single frame `-vframes 1` at high quality `-q:v 2`.
 - `parse_json_response(raw_text)`: Cleans markdown backticks (` ```json `) and extracts outermost balanced JSON object or array.
@@ -394,7 +394,7 @@ npm run dev
 ---
 
 ## 22. External Integrations
-1. **Google Gemini API** (`gemini-2.5-flash`): Core LLM for multimodal lecture analysis, frame timestamp targeting, flashcards, mind maps, and note grounded Q&A.
+1. **Google Gemini API** (`gemini-3.6-flash`): Core LLM for multimodal lecture analysis, frame timestamp targeting, flashcards, mind maps, and note grounded Q&A.
 2. **Microsoft Edge Neural TTS (`edge-tts`)**: Dual-speaker neural audio generation for Indian English and Hindi.
 3. **Clerk Auth**: Authentication and user management.
 4. **YouTube Integration**: Direct extraction through Gemini APIs.
