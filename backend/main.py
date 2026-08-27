@@ -480,7 +480,7 @@ if GROQ_API_KEY:
     except Exception as e:
         print(f"Error initializing Groq client: {e}")
 
-def call_groq_text(prompt: str, is_json: bool = False, model: str = "llama3-8b-8192") -> str:
+def call_groq_text(prompt: str, is_json: bool = False, model: str = "openai/gpt-oss-20b") -> str:
     if not groq_client:
         raise ValueError("Groq client not configured")
     messages = [{"role": "user", "content": prompt}]
