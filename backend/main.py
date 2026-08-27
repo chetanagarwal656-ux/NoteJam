@@ -489,8 +489,9 @@ def call_groq_text(prompt: str, is_json: bool = False, model: str = "openai/gpt-
         "messages": messages,
         "temperature": 0.2,
     }
-    if is_json:
-        params["response_format"] = {"type": "json_object"}
+    # NOTE: Do NOT set response_format={"type": "json_object"} here.
+    # Groq's strict JSON validation rejects LaTeX backslashes (\mathbb, \cap, etc.)
+    # before we can fix them. We parse JSON ourselves in parse_json_response().
     chat_completion = groq_client.chat.completions.create(**params)
     content = chat_completion.choices[0].message.content
     if not content:
@@ -512,8 +513,8 @@ def call_openrouter_text(prompt: str, is_json: bool = False, model: str = "openr
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.2
     }
-    if is_json:
-        payload["response_format"] = {"type": "json_object"}
+    # NOTE: Do NOT set response_format for OpenRouter either,
+    # same LaTeX backslash issue as Groq.
     
     with httpx.Client(timeout=120.0) as client:
         resp = client.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload)
@@ -531,6 +532,63 @@ def call_openrouter_text(prompt: str, is_json: bool = False, model: str = "openr
 def get_public_base_url() -> str:
     return os.getenv("PUBLIC_BASE_URL", "http://localhost:8000").rstrip("/")
 
+def _fix_latex_backslashes_for_json(text: str) -> str:
+    """Fix unescaped LaTeX backslashes so json.loads won't crash.
+    Scans character-by-character to properly double-escape backslashes
+    that are LaTeX commands (not valid JSON escape sequences)."""
+    result = []
+    i = 0
+    while i < len(text):
+        if text[i] == '\\':
+            # Check what follows the backslash
+            if i + 1 < len(text):
+                next_char = text[i + 1]
+                if next_char == '\\':
+                    # Already escaped (\\), keep both
+                    result.append('\\\\')
+                    i += 2
+                    continue
+                elif next_char == '"' or next_char == '/' :
+                    # Valid JSON escapes: \" \/
+                    result.append('\\')
+                    result.append(next_char)
+                    i += 2
+                    continue
+                elif next_char == 'u' and i + 5 < len(text) and all(c in '0123456789abcdefABCDEF' for c in text[i+2:i+6]):
+                    # Valid JSON unicode escape: \uXXXX
+                    result.append(text[i:i+6])
+                    i += 6
+                    continue
+                elif next_char in 'bfnrt':
+                    # Could be valid JSON escape (\b \f \n \r \t) OR LaTeX (\beta \frac \neq \right \theta \tau)
+                    # Distinguish: if followed by more letters, it's LaTeX
+                    if i + 2 < len(text) and text[i + 2].isalpha():
+                        # LaTeX command like \frac, \beta, \right — double-escape
+                        result.append('\\\\')
+                        result.append(next_char)
+                        i += 2
+                        continue
+                    else:
+                        # Genuine JSON escape like \n or \t
+                        result.append('\\')
+                        result.append(next_char)
+                        i += 2
+                        continue
+                else:
+                    # Any other char after \ (like \m, \c, \l, \s, etc.) — LaTeX, double-escape
+                    result.append('\\\\')
+                    result.append(next_char)
+                    i += 2
+                    continue
+            else:
+                # Trailing backslash at end of string
+                result.append('\\\\')
+                i += 1
+        else:
+            result.append(text[i])
+            i += 1
+    return ''.join(result)
+
 def parse_json_response(raw_text: str):
     cleaned = raw_text.strip()
     if cleaned.startswith("```json"):
@@ -540,19 +598,25 @@ def parse_json_response(raw_text: str):
         cleaned = re.sub(r"^```\s*", "", cleaned)
         cleaned = re.sub(r"\s*```$", "", cleaned)
 
-    cleaned = re.sub(r'\\([^"\\/bfnrtu])', r'\\\\\1', cleaned)
-
+    # ALWAYS fix LaTeX backslashes first to prevent silent corruption
+    # (e.g. \frac being parsed as form-feed + "rac" by json.loads)
+    fixed = _fix_latex_backslashes_for_json(cleaned)
     try:
-        return json.loads(cleaned)
+        return json.loads(fixed)
     except json.JSONDecodeError:
-        start_candidates = [idx for idx in (cleaned.find("{"), cleaned.find("[")) if idx != -1]
-        if not start_candidates:
-            raise
-        start = min(start_candidates)
-        end = max(cleaned.rfind("}"), cleaned.rfind("]"))
-        if end <= start:
-            raise
-        return json.loads(cleaned[start:end + 1])
+        pass
+
+    # Fallback: extract outermost JSON structure, fix, and retry
+    start_candidates = [idx for idx in (cleaned.find("{"), cleaned.find("[")) if idx != -1]
+    if not start_candidates:
+        raise json.JSONDecodeError("No JSON structure found", cleaned, 0)
+    start = min(start_candidates)
+    end = max(cleaned.rfind("}"), cleaned.rfind("]"))
+    if end <= start:
+        raise json.JSONDecodeError("No valid JSON structure found", cleaned, 0)
+    substring = cleaned[start:end + 1]
+    fixed_sub = _fix_latex_backslashes_for_json(substring)
+    return json.loads(fixed_sub)
 
 SYSTEM_PROMPT = """
 You are Note Jam, an elite AI teaching assistant.
