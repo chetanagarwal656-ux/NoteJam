@@ -3796,19 +3796,19 @@
 .markdown:not(.markdownLight):not(.handwritten) code { background: rgba(255, 255, 255, 0.15) !important; color: #e2e8f0 !important; padding: 2px 6px; border-radius: 4px; }
 
 /* Light Mode */
-.markdown.markdownLight:not(.handwritten) pre { background: rgba(241, 245, 249, 0.8) !important; border: 1px solid rgba(0,0,0,0.1) !important; }
-.markdown.markdownLight:not(.handwritten) pre code { background: transparent !important; color: #0f172a !important; }
-.markdown.markdownLight:not(.handwritten) code { background: rgba(0, 0, 0, 0.08) !important; color: #0f172a !important; padding: 2px 6px; border-radius: 4px; }
+.markdownLight:not(.handwritten) pre { background: rgba(241, 245, 249, 0.8) !important; border: 1px solid rgba(0,0,0,0.1) !important; }
+.markdownLight:not(.handwritten) pre code { background: transparent !important; color: #0f172a !important; }
+.markdownLight:not(.handwritten) code { background: rgba(0, 0, 0, 0.08) !important; color: #0f172a !important; padding: 2px 6px; border-radius: 4px; }
 
-/* Dark Notepad (Blue) */
-.markdown.handwritten:not(.markdownLight) pre { background: rgba(14, 165, 233, 0.05) !important; border: 1px solid rgba(56, 189, 248, 0.2) !important; }
-.markdown.handwritten:not(.markdownLight) pre code { background: transparent !important; color: #7dd3fc !important; }
-.markdown.handwritten:not(.markdownLight) code { background: rgba(56, 189, 248, 0.15) !important; color: #7dd3fc !important; padding: 2px 6px; border-radius: 4px; }
+/* Dark Notepad (Blue paper, blue ink) */
+.handwritten:not(.markdownLight) pre { background: rgba(0, 0, 0, 0.05) !important; border: 1px solid rgba(2, 132, 199, 0.3) !important; }
+.handwritten:not(.markdownLight) pre code { background: transparent !important; color: #0369a1 !important; font-weight: 600; }
+.handwritten:not(.markdownLight) code { background: rgba(2, 132, 199, 0.1) !important; color: #0369a1 !important; padding: 2px 6px; border-radius: 4px; font-weight: 600; }
 
-/* Light Notepad (Yellow) */
-.markdown.markdownLight.handwritten pre { background: rgba(253, 230, 138, 0.3) !important; border: 1px solid rgba(217, 119, 6, 0.2) !important; }
-.markdown.markdownLight.handwritten pre code { background: transparent !important; color: #166534 !important; }
-.markdown.markdownLight.handwritten code { background: rgba(22, 101, 52, 0.1) !important; color: #166534 !important; padding: 2px 6px; border-radius: 4px; }
+/* Light Notepad (Yellow paper, dark ink) */
+.markdownLight.handwritten pre { background: rgba(0, 0, 0, 0.04) !important; border: 1px solid rgba(180, 83, 9, 0.3) !important; }
+.markdownLight.handwritten pre code { background: transparent !important; color: #07111f !important; font-weight: 600; }
+.markdownLight.handwritten code { background: rgba(180, 83, 9, 0.1) !important; color: #9a3412 !important; padding: 2px 6px; border-radius: 4px; font-weight: 600; }
 
 /* TABLE FIXES (Since remark-gfm is now active) */
 .markdown table { width: 100%; border-collapse: collapse; margin: 1.5rem 0; font-size: 0.95em; }
@@ -3817,10 +3817,9 @@
 
 /* FORCE OVERRIDE TIMESTAMP THEMES */
 .markdown:not(.markdownLight):not(.handwritten) .timestampBtn { background: rgba(255, 255, 255, 0.15) !important; color: #e2e8f0 !important; border-color: rgba(255,255,255,0.2) !important; }
-.markdown.markdownLight:not(.handwritten) .timestampBtn { background: rgba(37, 99, 235, 0.1) !important; color: #1e3a8a !important; border-color: rgba(37, 99, 235, 0.3) !important; }
-.markdown.handwritten:not(.markdownLight) .timestampBtn { background: rgba(56, 189, 248, 0.15) !important; color: #7dd3fc !important; border-color: rgba(56, 189, 248, 0.3) !important; }
-.markdown.markdownLight.handwritten .timestampBtn { background: rgba(30, 58, 138, 0.1) !important; color: #1e3a8a !important; border-color: rgba(30, 58, 138, 0.3) !important; }
-
+.markdownLight:not(.handwritten) .timestampBtn { background: rgba(37, 99, 235, 0.1) !important; color: #1e3a8a !important; border-color: rgba(37, 99, 235, 0.3) !important; }
+.handwritten:not(.markdownLight) .timestampBtn { background: rgba(2, 132, 199, 0.15) !important; color: #0369a1 !important; border-color: rgba(2, 132, 199, 0.3) !important; }
+.markdownLight.handwritten .timestampBtn { background: rgba(180, 83, 9, 0.15) !important; color: #9a3412 !important; border-color: rgba(180, 83, 9, 0.3) !important; }
 /* ============================================================
    MOBILE-FIRST DASHBOARD RESPONSIVE STYLING (<= 768px)
    ============================================================ */
@@ -4462,6 +4461,7 @@
   from { opacity: 0; transform: scale(0.94) translateY(8px); }
   to { opacity: 1; transform: scale(1) translateY(0); }
 }
+
 
 
 

@@ -11,14 +11,28 @@ interface SketchRendererProps {
 }
 
 // Formats bullet text to intelligently highlight numbers, math expressions, and keywords
+const sanitizeMath = (str: string) => {
+  return str
+    .replace(/\^c/g, '?')
+    .replace(/\^2/g, '²')
+    .replace(/\^3/g, '³')
+    .replace(/\^n/g, 'n')
+    .replace(/\^T/g, '?')
+    .replace(/_1/g, '1')
+    .replace(/_2/g, '2')
+    .replace(/_i/g, '?')
+    .replace(/_n/g, '?');
+};
+
 const renderFormattedSpans = (
   text: string,
   baseX: number,
   accentColor: string
 ): React.ReactNode => {
+  const sanitizedText = sanitizeMath(text);
   // Regex to detect numbers, fractions (13/25), time spans (15-min), math vars, or uppercase terms
   const tokenRegex = /(\b\d+(?:[\/.:-]\d+)*\b|\b\d+(?:-[a-zA-Z]+)?\b|[A-Za-z]\s*=\s*[^,;]+|\b[A-Z]{2,}\b)/g;
-  const parts = text.split(tokenRegex);
+  const parts = sanitizedText.split(tokenRegex);
 
   return parts.map((part, pIdx) => {
     if (!part) return null;
@@ -139,13 +153,13 @@ export const SketchRenderer: React.FC<SketchRendererProps> = ({
         <style>{`
           .hubTitleText { font: 800 24px var(--font-kalam), "Comic Sans MS", cursive; fill: #0f172a; }
           .hubThesisText { font: 500 12px system-ui, -apple-system, sans-serif; fill: #475569; }
-          .cardTitleText { font: 700 15px var(--font-kalam), "Comic Sans MS", cursive; fill: #0f172a; letter-spacing: 0.1px; }
+          .cardTitleText { font: 700 18px var(--font-kalam), "Comic Sans MS", cursive; fill: #0f172a; letter-spacing: 0.1px; }
           .cardCueText { font: 700 10px system-ui, -apple-system, sans-serif; text-transform: uppercase; letter-spacing: 0.8px; }
-          .cardBulletText { font: 500 12.5px system-ui, -apple-system, sans-serif; fill: #334155; line-height: 1.45; }
-          .formulaPillText { font: 600 11px "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; fill: #475569; }
+          .cardBulletText { font: 500 15px system-ui, -apple-system, sans-serif; fill: #334155; line-height: 1.45; }
+          .formulaPillText { font: 600 13px "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; fill: #475569; }
           .compareHeaderTitle { font: 800 18px var(--font-kalam), "Comic Sans MS", cursive; fill: #0f172a; }
-          .takeawayTitle { font: 700 12px system-ui, -apple-system, sans-serif; fill: #92400e; text-transform: uppercase; letter-spacing: 0.7px; }
-          .takeawayBullet { font: 500 12px system-ui, -apple-system, sans-serif; fill: #334155; }
+          .takeawayTitle { font: 700 14px system-ui, -apple-system, sans-serif; fill: #92400e; text-transform: uppercase; letter-spacing: 0.7px; }
+          .takeawayBullet { font: 500 14px system-ui, -apple-system, sans-serif; fill: #334155; }
           .watermarkText { font: 700 10px system-ui, -apple-system, sans-serif; fill: #94a3b8; text-transform: uppercase; letter-spacing: 0.9px; }
         `}</style>
 
@@ -411,7 +425,7 @@ export const SketchRenderer: React.FC<SketchRendererProps> = ({
               {/* Card Title */}
               <text x={x + 14} y={titleStartY} className="cardTitleText" textAnchor="start">
                 {titleLines.map((line, idx) => (
-                  <tspan key={idx} x={x + 14} dy={idx === 0 ? 0 : 18}>
+                  <tspan key={idx} x={x + 14} dy={idx === 0 ? 0 : 22}>
                     {line}
                   </tspan>
                 ))}
@@ -432,7 +446,7 @@ export const SketchRenderer: React.FC<SketchRendererProps> = ({
                     <circle cx={x + 18} cy={currentY - 4} r="2.2" fill={theme.accent} />
                     <text x={x + 28} y={currentY} className="cardBulletText" textAnchor="start">
                       {lines.map((l, lIdx) => (
-                        <tspan key={lIdx} x={x + 28} dy={lIdx === 0 ? 0 : 15.5}>
+                        <tspan key={lIdx} x={x + 28} dy={lIdx === 0 ? 0 : 20}>
                           {renderFormattedSpans(l, x + 28, theme.accent)}
                         </tspan>
                       ))}
@@ -512,3 +526,5 @@ export const SketchRenderer: React.FC<SketchRendererProps> = ({
     </div>
   );
 };
+
+

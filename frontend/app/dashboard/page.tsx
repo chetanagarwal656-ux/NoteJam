@@ -5,7 +5,8 @@ import ReactPlayer from "react-player";
 import { Upload, Link as LinkIcon, Sparkles, Download, Loader2, Home, Clock, BookOpen, Layers, BrainCircuit, FileSignature, X, ChevronLeft, ChevronRight, RotateCcw, MessageCircle, Send, Save, Trash2, PenTool, Moon, Sun, Maximize2, Minimize2, Volume2, Play, Pause, FastForward, Rewind, PanelRightClose, FolderPlus, Folder as FolderIcon, FolderOpen, FolderSync } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import mermaid from "mermaid";
+import RechartsRenderer from './RechartsRenderer';
+import Mermaid from "mermaid";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import "katex/dist/katex.min.css";
@@ -1830,6 +1831,9 @@ const NoteApp = () => {
                     components={{
                       code({ inline, className, children, ...props }: ReactMarkdownCodeProps) {
                         const match = /language-(\w+)/.exec(className || '')
+                        if (!inline && match && match[1] === 'recharts') {
+                          return <RechartsRenderer jsonString={String(children)} theme={noteTheme} />
+                        }
                         if (!inline && match && match[1] === 'mermaid') {
                           return <Mermaid chart={String(children).replace(/\n$/, '')} noteTheme={noteTheme} isHandwritten={isHandwritten} />
                         }
@@ -2480,4 +2484,5 @@ const NoteApp = () => {
 export default function HomeApp() {
   return <NoteApp />;
 }
+
 
