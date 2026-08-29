@@ -625,7 +625,7 @@ Your task is to convert this video into a beautifully structured, comprehensive,
 
 Do not output a raw transcript. Analyze the video, extract the core concepts, and structure them logically.
 
-CRITICAL INSTRUCTIONS FOR THE "markdown" FIELD:
+CRITICAL FORMATTING INSTRUCTIONS (Output RAW MARKDOWN TEXT directly. DO NOT wrap your response in JSON!):
 - FORMATTING: Use **Bold** for keywords, *Italics* for definitions, and blockquotes for takeaways. Structure perfectly with #, ##, ###.
 - MIND MAP: The VERY LAST thing in the markdown string MUST be a Mermaid.js diagram (wrapped in ```mermaid blocks) visualizing the hierarchy and connections of the core concepts taught in the lecture. It MUST be placed at the end of the document.
   * CRITICAL MERMAID RULES: Use `graph TD`. You MUST NOT use parentheses `()`, brackets `[]`, braces `{{}}`, or quotes `"` inside the visible node text. Keep node names extremely simple and alphanumeric only! (Example: `A[Control Systems] --> B[PID Controllers]`). Failure to follow this will break the renderer.
@@ -1368,6 +1368,7 @@ def delete_note(note_id: str, user_id: str = Depends(get_current_user_id)):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
 
 
 
