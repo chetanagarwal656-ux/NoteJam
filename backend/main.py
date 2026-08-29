@@ -862,7 +862,12 @@ def run_process_job(job_id: str, language: str, user_id: str, url: Optional[str]
         update_process_job(job_id, status="complete", message="Notes ready", result=result)
     except Exception as e:
         print(f"Error processing video job {job_id}: {e}")
-        message = str(e) if ("rate limit" in str(e).lower() or "transcript" in str(e).lower()) else "NoteJam could not process this lecture. Please try another link or upload the video file directly."
+        error_str = str(e).lower()
+        # Pass through specific user-friendly error messages, use generic fallback for unexpected errors
+        if any(keyword in error_str for keyword in ["too long", "upload", "high traffic", "try again", "rate limit", "shorter video"]):
+            message = str(e)
+        else:
+            message = "NoteJam could not process this lecture. Please try another link or upload the video file directly."
         update_process_job(job_id, status="failed", message=message)
     finally:
         if video_path and os.path.exists(video_path):
