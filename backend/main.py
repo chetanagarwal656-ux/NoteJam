@@ -730,9 +730,13 @@ def call_best_text_model(prompt: str, is_json: bool = False) -> str:
     raise Exception("All AI engines (Groq, Gemini pool, OpenRouter) are currently busy. Please try again in a few moments.")
 
 def extract_youtube_transcript(url: str) -> Optional[str]:
-    """Fetch timestamped YouTube subtitles/transcript across all youtube-transcript-api versions."""
+    """Fetch timestamped YouTube subtitles/transcript using cookies if available."""
     try:
         from youtube_transcript_api import YouTubeTranscriptApi
+        import requests
+        import http.cookiejar
+        import os
+
         pattern = r'(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:watch\?v=|embed\/|v\/|shorts\/|live\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})'
         match = re.search(pattern, url)
         if not match:
@@ -741,9 +745,23 @@ def extract_youtube_transcript(url: str) -> Optional[str]:
         
         pieces = None
         
-        # 1. Try v1.x Instance API (Default in latest youtube-transcript-api)
+        # Load cookies to bypass IP ban
+        session = requests.Session()
+        cookie_path = os.path.abspath(os.path.join(os.path.dirname(__file__), 'cookies.txt'))
+        if os.path.exists(cookie_path):
+            try:
+                cookie_jar = http.cookiejar.MozillaCookieJar(cookie_path)
+                cookie_jar.load(ignore_discard=True, ignore_expires=True)
+                session.cookies.update(cookie_jar)
+                print(f"[Transcript Engine] Loaded cookies from {cookie_path} to bypass blocks.")
+            except Exception as e:
+                print(f"[Transcript Engine] Failed to load cookies.txt: {e}")
+        else:
+            print("[Transcript Engine] No cookies.txt found. Trying unauthenticated request...")
+        
+        # 1. Try v1.x Instance API with session
         try:
-            ytt = YouTubeTranscriptApi()
+            ytt = YouTubeTranscriptApi(http_client=session)
             try:
                 pieces = ytt.fetch(video_id, languages=['en', 'en-US', 'en-GB', 'en-IN', 'hi', 'hi-IN'])
             except Exception:
@@ -760,7 +778,7 @@ def extract_youtube_transcript(url: str) -> Optional[str]:
         except Exception as v1_err:
             print(f"Instance API attempt encountered: {v1_err}")
             
-        # 2. Try legacy static API if instance didn't return pieces
+        # 2. Try legacy static API (ignoring cookies as it doesn't support session nicely)
         if not pieces:
             try:
                 if hasattr(YouTubeTranscriptApi, 'get_transcript'):
