@@ -729,91 +729,6 @@ def call_best_text_model(prompt: str, is_json: bool = False) -> str:
             
     raise Exception("All AI engines (Groq, Gemini pool, OpenRouter) are currently busy. Please try again in a few moments.")
 
-def extract_youtube_transcript(url: str) -> Optional[str]:
-    """Fetch timestamped YouTube subtitles/transcript using cookies if available."""
-    try:
-        from youtube_transcript_api import YouTubeTranscriptApi
-        import requests
-        import http.cookiejar
-        import os
-
-        pattern = r'(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:watch\?v=|embed\/|v\/|shorts\/|live\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})'
-        match = re.search(pattern, url)
-        if not match:
-            return None
-        video_id = match.group(1)
-        
-        pieces = None
-        
-        # Load cookies + browser headers to bypass IP ban
-        session = requests.Session()
-        session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-            'Accept-Language': 'en-US,en;q=0.9,hi;q=0.8',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            'Referer': 'https://www.youtube.com/',
-            'Origin': 'https://www.youtube.com',
-        })
-        cookie_path = os.path.abspath(os.path.join(os.path.dirname(__file__), 'cookies.txt'))
-        if os.path.exists(cookie_path):
-            try:
-                cookie_jar = http.cookiejar.MozillaCookieJar(cookie_path)
-                cookie_jar.load(ignore_discard=True, ignore_expires=True)
-                session.cookies = cookie_jar
-                print(f"[Transcript Engine] Loaded {len(cookie_jar)} cookies + browser headers to bypass blocks.")
-            except Exception as e:
-                print(f"[Transcript Engine] Failed to load cookies.txt: {e}")
-        else:
-            print("[Transcript Engine] No cookies.txt found. Trying unauthenticated request...")
-        
-        # 1. Try v1.x Instance API with session
-        try:
-            ytt = YouTubeTranscriptApi(http_client=session)
-            try:
-                pieces = ytt.fetch(video_id, languages=['en', 'en-US', 'en-GB', 'en-IN', 'hi', 'hi-IN'])
-            except Exception:
-                try:
-                    pieces = ytt.fetch(video_id)
-                except Exception:
-                    try:
-                        t_list = ytt.list(video_id)
-                        for t in t_list:
-                            pieces = t.fetch()
-                            break
-                    except Exception as list_err:
-                        print(f"ytt.list failed for {video_id}: {list_err}")
-        except Exception as v1_err:
-            print(f"Instance API attempt encountered: {v1_err}")
-            
-        # 2. Try legacy static API (ignoring cookies as it doesn't support session nicely)
-        if not pieces:
-            try:
-                if hasattr(YouTubeTranscriptApi, 'get_transcript'):
-                    try:
-                        pieces = YouTubeTranscriptApi.get_transcript(video_id, languages=['en', 'en-US', 'en-GB', 'en-IN', 'hi', 'hi-IN'])
-                    except Exception:
-                        pieces = YouTubeTranscriptApi.get_transcript(video_id)
-            except Exception as v0_err:
-                print(f"Legacy get_transcript fallback encountered: {v0_err}")
-                    
-        if pieces:
-            formatted_lines = []
-            for item in pieces:
-                start_sec = int(item.get('start', 0) if isinstance(item, dict) else getattr(item, 'start', 0))
-                mm = start_sec // 60
-                ss = start_sec % 60
-                text = (item.get('text', '') if isinstance(item, dict) else getattr(item, 'text', '')).strip()
-                if text:
-                    formatted_lines.append(f"[{mm:02d}:{ss:02d}] {text}")
-            
-            raw_transcript = "\n".join(formatted_lines)
-            if len(raw_transcript) > 350000:
-                raw_transcript = raw_transcript[:350000] + "\n\n[Transcript truncated for length]"
-            return raw_transcript
-    except Exception as e:
-        print(f"Could not extract transcript for {url}: {e}")
-        return None
-    return None
 
 def normalize_youtube_url(url: str) -> str:
     """Normalize any YouTube URL (live, shorts, embed, youtu.be, query params) 
@@ -829,10 +744,10 @@ def normalize_youtube_url(url: str) -> str:
 def process_youtube_with_multi_tier(url: str, language: str, job_id: str) -> dict:
     canonical_url = normalize_youtube_url(url)
     
-    # Tier 1: Gemini Native Video Engine across Key Pool
+    # Gemini Native Video Engine across Key Pool (only tier)
     try:
         update_process_job(job_id, status="working", message="Analyzing video directly via Google Gemini...")
-        print(f"Tier 1: Trying Gemini Native Video Engine for {canonical_url}")
+        print(f"Trying Gemini Native Video Engine for {canonical_url}")
         markdown_output = robust_gemini_call(
             contents=[
                 genai.types.Part.from_uri(file_uri=canonical_url, mime_type="video/mp4"),
@@ -842,23 +757,25 @@ def process_youtube_with_multi_tier(url: str, language: str, job_id: str) -> dic
         )
         return {"markdown": markdown_output}
     except Exception as e:
-        print(f"Tier 1 Video Engine encountered error ({e}). Seamlessly switching to Transcript Engine...")
-
-    # Tier 2 & 3: Transcript Engine (98% Token Reduction)
-    update_process_job(job_id, status="working", message="Extracting lecture transcript for fast generation...")
-    transcript = extract_youtube_transcript(url)
-    if not transcript:
-        raise Exception("Could not process video with Gemini and no transcript was found for this video. Please upload the video file directly.")
-
-    update_process_job(job_id, status="working", message="Generating comprehensive study notes from lecture transcript...")
-    transcript_prompt = f"""
-{SYSTEM_PROMPT.format(language=language)}
-
-LECTURE TRANSCRIPT (WITH TIMESTAMPS):
-{transcript}
-"""
-    markdown_output = call_best_text_model(transcript_prompt, is_json=False)
-    return {"markdown": markdown_output}
+        error_msg = str(e).lower()
+        print(f"Gemini Video Engine failed: {e}")
+        
+        # Detect failure reason and show appropriate user-friendly message
+        if "too long" in error_msg or "duration" in error_msg or "length" in error_msg or "deadline" in error_msg or "timeout" in error_msg:
+            raise Exception(
+                "This video is too long for direct URL processing. "
+                "Please upload a shorter video or upload the video file directly."
+            )
+        elif "rate" in error_msg or "quota" in error_msg or "limit" in error_msg or "429" in error_msg or "resource" in error_msg or "exhausted" in error_msg:
+            raise Exception(
+                "Our servers are experiencing high traffic right now. "
+                "Please try again in a few minutes, or upload the video file directly."
+            )
+        else:
+            raise Exception(
+                "Could not process this video. "
+                "Please try again or upload the video file directly."
+            )
 
 def process_uploaded_file_and_generate_notes(media_path: str, language: str = "English") -> dict:
     """Process an uploaded video/audio file by uploading it to the Gemini File API."""
