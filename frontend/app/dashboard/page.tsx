@@ -6,7 +6,7 @@ import { Upload, Link as LinkIcon, Sparkles, Download, Loader2, Home, Clock, Boo
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import RechartsRenderer from './RechartsRenderer';
-import Mermaid from "mermaid";
+import mermaid from "mermaid";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import "katex/dist/katex.min.css";
@@ -2484,5 +2484,6 @@ const NoteApp = () => {
 export default function HomeApp() {
   return <NoteApp />;
 }
+
 
 
