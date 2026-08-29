@@ -1830,8 +1830,6 @@ const NoteApp = () => {
                     components={{
                       code({ inline, className, children, ...props }: ReactMarkdownCodeProps) {
                         const match = /language-(\w+)/.exec(className || '')
-                        theme={noteTheme} />
-                        }
                         if (!inline && match && match[1] === 'mermaid') {
                           return <Mermaid chart={String(children).replace(/\n$/, '')} noteTheme={noteTheme} isHandwritten={isHandwritten} />
                         }
@@ -2482,6 +2480,7 @@ const NoteApp = () => {
 export default function HomeApp() {
   return <NoteApp />;
 }
+
 
 
 
