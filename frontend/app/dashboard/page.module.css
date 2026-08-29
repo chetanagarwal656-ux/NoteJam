@@ -3790,10 +3790,30 @@
 }
 
 /* FORCE OVERRIDE CODE BLOCK THEMES */
-.markdown:not(.markdownLight):not(.handwritten) code { background: rgba(255, 255, 255, 0.15) !important; color: #e2e8f0 !important; }
-.markdown.markdownLight:not(.handwritten) code { background: rgba(0, 0, 0, 0.08) !important; color: #0f172a !important; }
-.markdown.handwritten:not(.markdownLight) code { background: rgba(56, 189, 248, 0.15) !important; color: #7dd3fc !important; }
-.markdown.markdownLight.handwritten code { background: rgba(30, 58, 138, 0.1) !important; color: #1e3a8a !important; }
+/* Dark Mode */
+.markdown:not(.markdownLight):not(.handwritten) pre { background: rgba(15, 23, 42, 0.6) !important; border: 1px solid rgba(255,255,255,0.1) !important; }
+.markdown:not(.markdownLight):not(.handwritten) pre code { background: transparent !important; color: #e2e8f0 !important; }
+.markdown:not(.markdownLight):not(.handwritten) code { background: rgba(255, 255, 255, 0.15) !important; color: #e2e8f0 !important; padding: 2px 6px; border-radius: 4px; }
+
+/* Light Mode */
+.markdown.markdownLight:not(.handwritten) pre { background: rgba(241, 245, 249, 0.8) !important; border: 1px solid rgba(0,0,0,0.1) !important; }
+.markdown.markdownLight:not(.handwritten) pre code { background: transparent !important; color: #0f172a !important; }
+.markdown.markdownLight:not(.handwritten) code { background: rgba(0, 0, 0, 0.08) !important; color: #0f172a !important; padding: 2px 6px; border-radius: 4px; }
+
+/* Dark Notepad (Blue) */
+.markdown.handwritten:not(.markdownLight) pre { background: rgba(14, 165, 233, 0.05) !important; border: 1px solid rgba(56, 189, 248, 0.2) !important; }
+.markdown.handwritten:not(.markdownLight) pre code { background: transparent !important; color: #7dd3fc !important; }
+.markdown.handwritten:not(.markdownLight) code { background: rgba(56, 189, 248, 0.15) !important; color: #7dd3fc !important; padding: 2px 6px; border-radius: 4px; }
+
+/* Light Notepad (Yellow) */
+.markdown.markdownLight.handwritten pre { background: rgba(253, 230, 138, 0.3) !important; border: 1px solid rgba(217, 119, 6, 0.2) !important; }
+.markdown.markdownLight.handwritten pre code { background: transparent !important; color: #166534 !important; }
+.markdown.markdownLight.handwritten code { background: rgba(22, 101, 52, 0.1) !important; color: #166534 !important; padding: 2px 6px; border-radius: 4px; }
+
+/* TABLE FIXES (Since remark-gfm is now active) */
+.markdown table { width: 100%; border-collapse: collapse; margin: 1.5rem 0; font-size: 0.95em; }
+.markdown th, .markdown td { border: 1px solid rgba(150, 150, 150, 0.2) !important; padding: 12px 16px; text-align: left; }
+.markdown th { font-weight: 600; background: rgba(150, 150, 150, 0.1) !important; }
 
 /* FORCE OVERRIDE TIMESTAMP THEMES */
 .markdown:not(.markdownLight):not(.handwritten) .timestampBtn { background: rgba(255, 255, 255, 0.15) !important; color: #e2e8f0 !important; border-color: rgba(255,255,255,0.2) !important; }
@@ -4442,5 +4462,6 @@
   from { opacity: 0; transform: scale(0.94) translateY(8px); }
   to { opacity: 1; transform: scale(1) translateY(0); }
 }
+
 
 

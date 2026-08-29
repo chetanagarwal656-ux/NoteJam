@@ -631,7 +631,7 @@ CRITICAL INSTRUCTIONS FOR THE "markdown" FIELD:
   * CRITICAL MERMAID RULES: Use `graph TD`. You MUST NOT use parentheses `()`, brackets `[]`, braces `{{}}`, or quotes `"` inside the visible node text. Keep node names extremely simple and alphanumeric only! (Example: `A[Control Systems] --> B[PID Controllers]`). Failure to follow this will break the renderer.
 - VISUALS: You cannot output images. If the video contains important diagrams, graphs, flowcharts, tables, mathematical equations, chemical structures, circuit diagrams, or anything drawn on a whiteboard or slide, YOU MUST meticulously recreate them using Mermaid.js diagrams, highly detailed Markdown Tables, LaTeX matrices, or structured text. Do NOT skip any visual content — recreate everything the teacher writes or draws.
 - MATH: YOU MUST USE LaTeX strictly for all math, variables, vectors, matrices, and superscripts. Inline: `$E = mc^2$`, `$R^n$`, `$A^T$`. Block: `$$...$$`. **CRITICAL: NEVER use markdown inline code backticks (like `R^n` or `A^T`) for math, vectors, or formulas. Always use dollar signs.**
-- VIDEO SYNC: Heavily inject exact timestamp tags `[MM:SS]` throughout the text whenever you explain a new concept, so the user can click them to sync the video.
+- VIDEO SYNC: Heavily inject exact timestamp tags `[MM:SS](#MM:SS)` throughout the text whenever you explain a new concept, so the user can click them to sync the video.
 
 LANGUAGE:
 Translate and write the markdown notes entirely in the requested language: {language}.
@@ -927,7 +927,7 @@ def create_flashcards(req: FlashcardRequest, user_id: str = Depends(get_current_
     {req.markdown}
     """
     try:
-        raw_text = call_best_text_model(prompt=prompt, is_json=True)
+        raw_text = robust_gemini_call(contents=[prompt], is_json=True)
         flashcards = parse_json_response(raw_text)
         return {"flashcards": flashcards}
     except Exception as e:
@@ -950,7 +950,7 @@ def create_cheatsheet(req: DocumentRequest, user_id: str = Depends(get_current_u
     {req.markdown}
     """
     try:
-        raw_text = call_best_text_model(prompt=prompt, is_json=True)
+        raw_text = robust_gemini_call(contents=[prompt], is_json=True)
         return {"cheatsheet": parse_json_response(raw_text)}
     except Exception as e:
         print(f"Error generating cheatsheet: {e}")
@@ -1034,7 +1034,7 @@ def create_mindmap(req: DocumentRequest, user_id: str = Depends(get_current_user
     {req.markdown}
     """
     try:
-        raw_text = call_best_text_model(prompt=prompt, is_json=True)
+        raw_text = robust_gemini_call(contents=[prompt], is_json=True)
         data = parse_json_response(raw_text)
         data["version"] = "revision-sheet-v2"
         return {"mindmap": data}
@@ -1148,7 +1148,7 @@ Example:
 Lecture Notes:
 {req.markdown}
 """
-        raw_text = call_best_text_model(prompt=prompt, is_json=True)
+        raw_text = robust_gemini_call(contents=[prompt], is_json=True)
         if not raw_text:
             raise ValueError("Model failed to generate a response.")
             
@@ -1368,3 +1368,4 @@ def delete_note(note_id: str, user_id: str = Depends(get_current_user_id)):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+

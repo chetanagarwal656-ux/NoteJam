@@ -4,6 +4,7 @@ import { useCallback, useState, useEffect, useRef } from "react";
 import ReactPlayer from "react-player";
 import { Upload, Link as LinkIcon, Sparkles, Download, Loader2, Home, Clock, BookOpen, Layers, BrainCircuit, FileSignature, X, ChevronLeft, ChevronRight, RotateCcw, MessageCircle, Send, Save, Trash2, PenTool, Moon, Sun, Maximize2, Minimize2, Volume2, Play, Pause, FastForward, Rewind, PanelRightClose, FolderPlus, Folder as FolderIcon, FolderOpen, FolderSync } from "lucide-react";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import mermaid from "mermaid";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
@@ -165,7 +166,7 @@ const normalizeFlashcardMath = (text: string) => (
 
 const FlashcardRichText = ({ text }: { text: string }) => (
   <div className={styles.flashcardRichText}>
-    <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+    <ReactMarkdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}>
       {normalizeFlashcardMath(text)}
     </ReactMarkdown>
   </div>
@@ -1348,7 +1349,7 @@ const NoteApp = () => {
                 <div key={idx} className={styles.cheatsheetItem}>
                   <div className={styles.cheatsheetTitle}>{title}</div>
                   <div className={styles.cheatsheetContent}>
-                    <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{content}</ReactMarkdown>
+                    <ReactMarkdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}>{content}</ReactMarkdown>
                   </div>
                 </div>
               );
@@ -1356,7 +1357,7 @@ const NoteApp = () => {
             return (
               <div key={idx} className={styles.cheatsheetItem}>
                 <div className={styles.cheatsheetContent}>
-                  <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{item}</ReactMarkdown>
+                  <ReactMarkdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}>{item}</ReactMarkdown>
                 </div>
               </div>
             );
@@ -1418,7 +1419,7 @@ const NoteApp = () => {
             ) : (
               chatMessages.map((msg, i) => (
                 <div key={i} className={`${styles.chatMessage} ${styles[msg.role]}`}>
-                  <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{msg.content}</ReactMarkdown>
+                  <ReactMarkdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}>{msg.content}</ReactMarkdown>
                 </div>
               ))
             )}
@@ -1824,7 +1825,7 @@ const NoteApp = () => {
                 )}
                 <div className={`${styles.markdown} ${noteTheme === 'light' ? styles.markdownLight : ''} ${isHandwritten ? styles.handwritten : ''}`} onMouseUp={handleMouseUp}>
                   <ReactMarkdown 
-                    remarkPlugins={[remarkMath]} 
+                    remarkPlugins={[remarkMath, remarkGfm]} 
                     rehypePlugins={[rehypeKatex]}
                     components={{
                       code({ inline, className, children, ...props }: ReactMarkdownCodeProps) {
@@ -2479,3 +2480,4 @@ const NoteApp = () => {
 export default function HomeApp() {
   return <NoteApp />;
 }
+
