@@ -714,8 +714,11 @@ const NoteApp = () => {
         }
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : "";
+        const lowerMsg = msg.toLowerCase();
         if (msg && msg !== "Failed to fetch" && !msg.includes("NetworkError")) {
-          if (msg.includes("failed") || msg.includes("too long") || msg.includes("rate limit") || msg.includes("quota") || msg.includes("not found")) {
+          // If the backend explicitly returned a failed status with ANY message, we should probably stop polling
+          // rather than infinite looping, but we specifically catch fatal errors here
+          if (lowerMsg.includes("failed") || lowerMsg.includes("too long") || lowerMsg.includes("rate limit") || lowerMsg.includes("quota") || lowerMsg.includes("not found") || lowerMsg.includes("could not process")) {
             throw err;
           }
         }
