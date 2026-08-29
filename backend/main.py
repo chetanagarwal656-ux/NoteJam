@@ -1052,6 +1052,10 @@ def simplify_text(req: SimplifyRequest, user_id: str = Depends(get_current_user_
     and explain it simply, as if you were talking to a beginner or a 5-year-old.
     Use an analogy if helpful. Keep it concise, engaging, and easy to digest.
     Do not use complex jargon.
+    CRITICAL MATH FORMATTING:
+    YOU MUST USE LaTeX strictly for all math, variables, and formulas. 
+    Inline math: $E = mc^2$. Block math: $$...$$. 
+    NEVER use \[ ... \] or \( ... \) for math blocks! Always use dollar signs to ensure compatibility with our renderer.
     
     Text to simplify:
     "{req.text}"
@@ -1083,6 +1087,10 @@ def chat_lecture(req: ChatRequest, user_id: str = Depends(get_current_user_id)):
     You are an expert study assistant. You must answer the student's questions using ONLY the provided lecture notes.
     If the answer is not contained in the notes, say "I cannot answer this based on the lecture notes."
     Be helpful, direct, and conversational.
+    CRITICAL MATH FORMATTING:
+    YOU MUST USE LaTeX strictly for all math, variables, and formulas. 
+    Inline math: $E = mc^2$. Block math: $$...$$. 
+    NEVER use \[ ... \] or \( ... \) for math blocks! Always use dollar signs to ensure compatibility with our renderer.
     
     Lecture Notes:
     {req.markdown}
@@ -1368,6 +1376,7 @@ def delete_note(note_id: str, user_id: str = Depends(get_current_user_id)):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
 
 
 
