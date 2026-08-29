@@ -164,6 +164,23 @@ const normalizeFlashcardMath = (text: string) => (
   text.replace(/\\\\([A-Za-z])/g, "\\$1")
 );
 
+const normalizeChatMath = (text: string) => {
+  if (!text) return "";
+  let parsed = text;
+  
+  parsed = parsed.replace(/\\\[([\s\S]*?)\\\]/g, '1');
+  parsed = parsed.replace(/\\\(([\s\S]*?)\\\)/g, '');
+  
+  let tmp = parsed.replace(/\[\s*(.*?[\=\\\_\^\(\)].*?)\s*\]/g, (match, p1) => {
+      return '' + p1 + '';
+  });
+  
+  if (!tmp.includes('(')) {
+      parsed = tmp;
+  }
+  return parsed;
+};
+
 const FlashcardRichText = ({ text }: { text: string }) => (
   <div className={styles.flashcardRichText}>
     <ReactMarkdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}>
@@ -1419,7 +1436,7 @@ const NoteApp = () => {
             ) : (
               chatMessages.map((msg, i) => (
                 <div key={i} className={`${styles.chatMessage} ${styles[msg.role]}`}>
-                  <ReactMarkdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}>{msg.content}</ReactMarkdown>
+                  <ReactMarkdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}>{normalizeChatMath(msg.content)}</ReactMarkdown>
                 </div>
               ))
             )}
@@ -2480,6 +2497,8 @@ const NoteApp = () => {
 export default function HomeApp() {
   return <NoteApp />;
 }
+
+
 
 
 
