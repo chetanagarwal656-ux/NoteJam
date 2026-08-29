@@ -745,15 +745,22 @@ def extract_youtube_transcript(url: str) -> Optional[str]:
         
         pieces = None
         
-        # Load cookies to bypass IP ban
+        # Load cookies + browser headers to bypass IP ban
         session = requests.Session()
+        session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+            'Accept-Language': 'en-US,en;q=0.9,hi;q=0.8',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Referer': 'https://www.youtube.com/',
+            'Origin': 'https://www.youtube.com',
+        })
         cookie_path = os.path.abspath(os.path.join(os.path.dirname(__file__), 'cookies.txt'))
         if os.path.exists(cookie_path):
             try:
                 cookie_jar = http.cookiejar.MozillaCookieJar(cookie_path)
                 cookie_jar.load(ignore_discard=True, ignore_expires=True)
-                session.cookies.update(cookie_jar)
-                print(f"[Transcript Engine] Loaded cookies from {cookie_path} to bypass blocks.")
+                session.cookies = cookie_jar
+                print(f"[Transcript Engine] Loaded {len(cookie_jar)} cookies + browser headers to bypass blocks.")
             except Exception as e:
                 print(f"[Transcript Engine] Failed to load cookies.txt: {e}")
         else:
