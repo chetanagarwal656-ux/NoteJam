@@ -4049,45 +4049,52 @@
 
   /* Mobile Artifact Bottom Tab Bar */
   .mobileArtifactBar {
-    position: fixed;
-    bottom: 0;
+    position: sticky;
+    top: 55px; /* just below header */
     left: 0;
     right: 0;
     z-index: 800;
-    height: 60px;
+    height: 56px;
     display: flex;
     align-items: center;
-    justify-content: space-around;
-    background: rgba(8, 14, 20, 0.94);
+    justify-content: flex-start;
+    gap: 0.5rem;
+    background: rgba(10, 15, 22, 0.95);
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
-    border-top: 1px solid rgba(255, 255, 255, 0.12);
-    padding: 0 0.5rem;
-    padding-bottom: env(safe-area-inset-bottom, 0px);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    padding: 0 1rem;
+    overflow-x: auto;
+    scrollbar-width: none; /* Firefox */
+  }
+  .mobileArtifactBar::-webkit-scrollbar {
+    display: none; /* Safari and Chrome */
   }
 
   .mobileArtifactTab {
     background: transparent;
-    border: none;
-    color: rgba(255, 255, 255, 0.6);
+    border: 1px solid rgba(255,255,255,0.1);
+    color: rgba(255, 255, 255, 0.7);
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
     align-items: center;
     justify-content: center;
-    gap: 0.2rem;
-    font-size: 0.68rem;
-    font-weight: 700;
-    padding: 0.35rem 0.5rem;
-    border-radius: 10px;
+    gap: 0.4rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+    padding: 0.5rem 1rem;
+    border-radius: 99px;
     cursor: pointer;
     transition: all 180ms ease;
-    flex: 1;
-    min-width: 0;
+    flex-shrink: 0;
+    white-space: nowrap;
+    height: 36px;
   }
 
   .mobileArtifactTabActive {
-    color: #38bdf8;
-    background: rgba(56, 189, 248, 0.12);
+    color: #fff;
+    background: #38bdf8;
+    border-color: #38bdf8;
   }
 
   .mobileArtifactTab:active {
@@ -4478,3 +4485,70 @@
 
 
 
+
+
+  .studyWorkspace:has(.artifactConsole) .floatingPlayer {
+    display: none !important;
+  
+  /* Mobile Bottom Navigation */
+  .mobileBottomNav {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 800;
+    height: 70px;
+    display: flex;
+    align-items: center;
+    justify-content: space-around;
+    background: rgba(10, 15, 22, 0.96);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    padding: 0 0.5rem;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  .bottomNavBtn, .bottomNavProfileBtn {
+    background: transparent;
+    border: none;
+    color: rgba(255, 255, 255, 0.5);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.3rem;
+    font-size: 0.65rem;
+    font-weight: 600;
+    cursor: pointer;
+    width: 60px;
+  }
+
+  .bottomNavBtnActive {
+    color: #38bdf8;
+  }
+
+  .bottomNavAddBtn {
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    margin-top: -30px; /* Lift it up */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .bottomNavAddBtnInner {
+    width: 56px;
+    height: 56px;
+    background: #8b5cf6;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    box-shadow: 0 8px 20px rgba(139, 92, 246, 0.4);
+    border: 4px solid rgba(10, 15, 22, 1);
+  }
+
+}

@@ -8813,3 +8813,9 @@
   }
 }
 
+
+@media (max-width: 768px) {
+  .workflowCanvas, .featureNotesCascade, .floatingSymbol {
+    display: none !important;
+  }
+}

@@ -1720,6 +1720,96 @@ const NoteApp = () => {
             <UserButton appearance={{ elements: { userButtonAvatarBox: { width: '28px', height: '28px' } } }} />
           </div>
         </header>
+        {/* Mobile Top Artifact Navigation Bar */}
+        {markdown && (
+          <nav className={`${styles.mobileArtifactBar} no-print`}>
+            <button 
+              className={`${styles.mobileArtifactTab} ${!activeArtifact ? styles.mobileArtifactTabActive : ""}`}
+              onClick={() => {
+                setIsArtifactConsoleOpen(false);
+                setActiveArtifact(null);
+              }}
+            >
+              <BookOpen size={17} />
+              <span>Notes</span>
+            </button>
+            <button 
+              className={`${styles.mobileArtifactTab} ${activeArtifact === 'flashcards' ? styles.mobileArtifactTabActive : ''}`}
+              onClick={() => {
+                if (activeArtifact === 'flashcards' && isArtifactConsoleOpen) {
+                  setIsArtifactConsoleOpen(false);
+                  setActiveArtifact(null);
+                } else {
+                  setIsArtifactConsoleOpen(true);
+                  handleExportFlashcards();
+                }
+              }}
+            >
+              <Layers size={17} />
+              <span>Cards</span>
+            </button>
+            <button 
+              className={`${styles.mobileArtifactTab} ${activeArtifact === 'mindmap' ? styles.mobileArtifactTabActive : ''}`}
+              onClick={() => {
+                if (activeArtifact === 'mindmap' && isArtifactConsoleOpen) {
+                  setIsArtifactConsoleOpen(false);
+                  setActiveArtifact(null);
+                } else {
+                  setIsArtifactConsoleOpen(true);
+                  handleGenerateMindmap();
+                }
+              }}
+            >
+              <BrainCircuit size={17} />
+              <span>Mind Map</span>
+            </button>
+            <button 
+              className={`${styles.mobileArtifactTab} ${activeArtifact === 'cheatsheet' ? styles.mobileArtifactTabActive : ''}`}
+              onClick={() => {
+                if (activeArtifact === 'cheatsheet' && isArtifactConsoleOpen) {
+                  setIsArtifactConsoleOpen(false);
+                  setActiveArtifact(null);
+                } else {
+                  setIsArtifactConsoleOpen(true);
+                  handleGenerateCheatsheet();
+                }
+              }}
+            >
+              <FileSignature size={17} />
+              <span>Formula</span>
+            </button>
+            <button 
+              className={`${styles.mobileArtifactTab} ${activeArtifact === 'audio' ? styles.mobileArtifactTabActive : ''}`}
+              onClick={() => {
+                if (activeArtifact === 'audio' && isArtifactConsoleOpen) {
+                  setIsArtifactConsoleOpen(false);
+                  setActiveArtifact(null);
+                } else {
+                  setIsArtifactConsoleOpen(true);
+                  openArtifact('audio');
+                }
+              }}
+            >
+              <Volume2 size={17} />
+              <span>Audio</span>
+            </button>
+            <button 
+              className={`${styles.mobileArtifactTab} ${activeArtifact === 'chat' ? styles.mobileArtifactTabActive : ''}`}
+              onClick={() => {
+                if (activeArtifact === 'chat' && isArtifactConsoleOpen) {
+                  setIsArtifactConsoleOpen(false);
+                  setActiveArtifact(null);
+                } else {
+                  setIsArtifactConsoleOpen(true);
+                  openArtifact('chat');
+                }
+              }}
+            >
+              <MessageCircle size={17} />
+              <span>Chat</span>
+            </button>
+          </nav>
+        )}
         
         <div className={styles.workspaceWrapper}>
           {(currentView === 'home' || (currentView === 'notebooks' && markdown)) ? (
@@ -2143,84 +2233,48 @@ const NoteApp = () => {
           </div>
         )}
 
-        {/* Mobile Bottom Artifact Navigation Bar */}
-        {markdown && (
-          <nav className={`${styles.mobileArtifactBar} no-print`}>
+        
+
+        {/* Mobile Bottom Navigation Bar (Visible only when not viewing a note) */}
+        {!markdown && (
+          <nav className={`${styles.mobileBottomNav} no-print`}>
             <button 
-              className={`${styles.mobileArtifactTab} ${activeArtifact === 'flashcards' ? styles.mobileArtifactTabActive : ''}`}
-              onClick={() => {
-                if (activeArtifact === 'flashcards' && isArtifactConsoleOpen) {
-                  setIsArtifactConsoleOpen(false);
-                  setActiveArtifact(null);
-                } else {
-                  setIsArtifactConsoleOpen(true);
-                  handleExportFlashcards();
-                }
-              }}
+              className={`${styles.bottomNavBtn} ${currentView === 'home' ? styles.bottomNavBtnActive : ''}`}
+              onClick={() => resetWorkspace()}
             >
-              <Layers size={17} />
-              <span>Cards</span>
+              <Home size={20} />
+              <span>Home</span>
             </button>
             <button 
-              className={`${styles.mobileArtifactTab} ${activeArtifact === 'mindmap' ? styles.mobileArtifactTabActive : ''}`}
+              className={`${styles.bottomNavBtn} ${currentView === 'notebooks' ? styles.bottomNavBtnActive : ''}`}
               onClick={() => {
-                if (activeArtifact === 'mindmap' && isArtifactConsoleOpen) {
-                  setIsArtifactConsoleOpen(false);
-                  setActiveArtifact(null);
-                } else {
-                  setIsArtifactConsoleOpen(true);
-                  handleGenerateMindmap();
-                }
+                setIsPlaying(false);
+                setMarkdown(null);
+                setCurrentNoteId(null);
+                setCurrentView('notebooks');
               }}
             >
-              <BrainCircuit size={17} />
-              <span>Mind Map</span>
+              <BookOpen size={20} />
+              <span>Notes</span>
             </button>
+            
             <button 
-              className={`${styles.mobileArtifactTab} ${activeArtifact === 'cheatsheet' ? styles.mobileArtifactTabActive : ''}`}
-              onClick={() => {
-                if (activeArtifact === 'cheatsheet' && isArtifactConsoleOpen) {
-                  setIsArtifactConsoleOpen(false);
-                  setActiveArtifact(null);
-                } else {
-                  setIsArtifactConsoleOpen(true);
-                  handleGenerateCheatsheet();
-                }
-              }}
+              className={styles.bottomNavAddBtn}
+              onClick={() => resetWorkspace()}
             >
-              <FileSignature size={17} />
-              <span>Formula</span>
+              <div className={styles.bottomNavAddBtnInner}>
+                <Sparkles size={24} />
+              </div>
             </button>
-            <button 
-              className={`${styles.mobileArtifactTab} ${activeArtifact === 'audio' ? styles.mobileArtifactTabActive : ''}`}
-              onClick={() => {
-                if (activeArtifact === 'audio' && isArtifactConsoleOpen) {
-                  setIsArtifactConsoleOpen(false);
-                  setActiveArtifact(null);
-                } else {
-                  setIsArtifactConsoleOpen(true);
-                  openArtifact('audio');
-                }
-              }}
-            >
-              <Volume2 size={17} />
-              <span>Audio</span>
+            
+            <button className={styles.bottomNavBtn}>
+              <Layers size={20} />
+              <span>Workspace</span>
             </button>
-            <button 
-              className={`${styles.mobileArtifactTab} ${activeArtifact === 'chat' ? styles.mobileArtifactTabActive : ''}`}
-              onClick={() => {
-                if (activeArtifact === 'chat' && isArtifactConsoleOpen) {
-                  setIsArtifactConsoleOpen(false);
-                  setActiveArtifact(null);
-                } else {
-                  setIsArtifactConsoleOpen(true);
-                  openArtifact('chat');
-                }
-              }}
-            >
-              <MessageCircle size={17} />
-              <span>Chat</span>
-            </button>
+            <div className={styles.bottomNavProfileBtn}>
+              <UserButton appearance={{ elements: { userButtonAvatarBox: { width: '24px', height: '24px' } } }} />
+              <span>Profile</span>
+            </div>
           </nav>
         )}
       </main>
