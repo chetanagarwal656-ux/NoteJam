@@ -4581,3 +4581,11 @@
     border: 4px solid rgba(10, 15, 22, 1);
   }
 }
+
+@media (max-width: 768px) {
+  .mainCanvas {
+    flex-direction: column !important;
+    justify-content: flex-start !important;
+    display: flex !important;
+  }
+}
