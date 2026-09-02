@@ -4589,3 +4589,49 @@
     display: flex !important;
   }
 }
+
+@media (max-width: 768px) {
+  /* Fix Workspace and Markdown margins/padding for mobile */
+  .workspaceWrapper {
+    padding: 0.5rem 0 5.5rem !important; /* Remove side padding to give more room */
+    width: 100% !important;
+    max-width: 100vw !important;
+  }
+
+  .markdown {
+    padding: 1.25rem 0.75rem !important; /* Reduce side padding inside the note */
+    border-radius: 0 !important; /* Edge to edge looks better on mobile */
+    overflow-x: visible !important; /* Do not hide overflow here, let pre handle it */
+    width: 100% !important;
+    max-width: 100vw !important;
+    border: none !important; /* Remove borders on mobile for edge-to-edge look */
+  }
+
+  .markdown.handwritten {
+    padding: 1.4rem 0.75rem 1.4rem 1.5rem !important;
+  }
+
+  /* Fix Code Blocks and ASCII Art */
+  .markdown pre {
+    overflow-x: auto !important; /* Horizontal scroll for wide content */
+    max-width: calc(100vw - 1.5rem) !important;
+    white-space: pre !important;
+    word-break: normal !important;
+    word-wrap: normal !important;
+    border-radius: 8px !important;
+    margin: 1rem 0 !important;
+    padding: 1rem !important;
+  }
+
+  .markdown pre code {
+    white-space: pre !important;
+    word-break: normal !important;
+    word-wrap: normal !important;
+  }
+}
+
+@media (max-width: 768px) {
+  .markdown blockquote {
+    padding: 0.75rem 1rem !important;
+  }
+}
