@@ -4661,3 +4661,35 @@
     border-radius: 0 !important;
   }
 }
+
+
+@media (max-width: 768px) {
+  /* A4 / PDF-like format for mobile notes */
+  .workspaceWrapper {
+    padding: 0.75rem !important;
+    background: #1e293b; /* Dark backdrop for the PDF viewer feel */
+  }
+
+  .markdown {
+    padding: 1.5rem 1.2rem !important;
+    margin: 0 auto !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    border-radius: 4px !important; /* Sharp corners like paper */
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4) !important; /* Drop shadow like a document */
+    
+    /* Shrink fonts to pack more text per line (PDF density) */
+    font-size: 0.8rem !important; 
+    line-height: 1.55 !important;
+  }
+
+  .markdown h1 { font-size: 1.3rem !important; margin-bottom: 0.8rem !important; }
+  .markdown h2 { font-size: 1.15rem !important; margin-bottom: 0.7rem !important; }
+  .markdown h3 { font-size: 1.05rem !important; margin-bottom: 0.6rem !important; }
+  
+  .markdown blockquote {
+    padding: 0.75rem 1rem !important;
+    margin: 1rem 0 !important;
+    font-size: 0.75rem !important;
+  }
+}
