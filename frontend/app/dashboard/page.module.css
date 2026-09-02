@@ -4635,3 +4635,29 @@
     padding: 0.75rem 1rem !important;
   }
 }
+
+@media (max-width: 768px) {
+  /* Fix Markdown Tables on Mobile */
+  .markdown table {
+    display: block !important;
+    width: 100% !important;
+    overflow-x: auto !important;
+    white-space: nowrap !important; /* Prevent aggressive text wrapping in cells */
+    -webkit-overflow-scrolling: touch;
+    border-collapse: collapse !important;
+  }
+  
+  .markdown th, .markdown td {
+    white-space: normal !important; /* Allow some wrapping if we set min-width */
+    min-width: 120px !important; /* Ensure columns don't squish */
+    word-break: normal !important;
+  }
+  
+  /* Make the A4 'page' feel better on mobile by extending width fully */
+  .markdown {
+    width: 100% !important;
+    max-width: 100vw !important;
+    margin: 0 !important;
+    border-radius: 0 !important;
+  }
+}
