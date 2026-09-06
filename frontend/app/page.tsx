@@ -1373,7 +1373,9 @@ export default function LandingPage() {
         <div className={styles.ambientBackdropVeil} />
       </div>
 
-      <motion.div
+      
+      <div className={styles.desktopOnly}>
+<motion.div
         className={styles.siteFrame}
         initial={{ opacity: 0, y: 18 }}
         animate={{ opacity: 1, y: 0 }}
@@ -1798,6 +1800,68 @@ export default function LandingPage() {
           </div>
         </footer>
       </motion.div>
+      </div>
+
+      <div className={styles.mobileLanding}>
+        <header className={styles.mHeader}>
+          <NoteJamLogoMark className={styles.mLogoIcon} />
+          <span className={styles.mLogoText}>NoteJam</span>
+        </header>
+
+        <section className={styles.mHero}>
+          <div className={styles.mEyebrow}>
+            <Zap size={14} color="#38bdf8" /> AI Study Platform
+          </div>
+          <h1 className={styles.mHeadline}>
+            Turn lectures into living study workspaces.
+          </h1>
+          <p className={styles.mSubhead}>
+            Paste a YouTube link and get premium notes, 3D flashcards, mind maps, and audio debates in seconds.
+          </p>
+
+          <form action="/dashboard" className={styles.mForm}>
+            <input
+              type="email"
+              name="email"
+              placeholder="Enter your email"
+              autoComplete="email"
+              className={styles.mInput}
+              required
+            />
+            <button type="submit" className={styles.mCtaButton}>
+              Start free trial
+            </button>
+          </form>
+        </section>
+
+        <section className={styles.mFeatures}>
+          <div className={styles.mFeatureCard}>
+            <div className={styles.mFeatureIconWrapper}>
+              <FileText size={22} color="#38bdf8" />
+            </div>
+            <h3>Premium Notes</h3>
+            <p>Timestamped, structured, and visually organized automatically.</p>
+          </div>
+          
+          <div className={styles.mFeatureCard}>
+            <div className={styles.mFeatureIconWrapper}>
+              <Layers3 size={22} color="#8b5cf6" />
+            </div>
+            <h3>Smart Flashcards</h3>
+            <p>Active recall questions generated directly from the lecture concepts.</p>
+          </div>
+          
+          <div className={styles.mFeatureCard}>
+            <div className={styles.mFeatureIconWrapper}>
+              <Network size={22} color="#10b981" />
+            </div>
+            <h3>Concept Mind Maps</h3>
+            <p>Visual networks that connect ideas and prerequisites for easy review.</p>
+          </div>
+        </section>
+      </div>
+
+
 
       {/* Floating Mobile Bottom CTA */}
       <div className={styles.mobileStickyCta}>
