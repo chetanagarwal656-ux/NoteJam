@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef, useState, useEffect } from "react";
 import type { CSSProperties, MouseEvent } from "react";
 import Image from "next/image";
 import Link from "next/link";
@@ -1326,6 +1326,87 @@ function StoreDownloadPanel() {
   );
 }
 
+function FeatureCarousel() {
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [isHovered, setIsHovered] = useState(false);
+
+  useEffect(() => {
+    if (isHovered) return;
+    const interval = setInterval(() => {
+      setActiveIndex((prev) => (prev + 1) % featurePanels.length);
+    }, 6000);
+    return () => clearInterval(interval);
+  }, [isHovered]);
+
+  return (
+    <div 
+      className={styles.featureCarousel}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+    >
+      <div 
+        className={styles.carouselTrack}
+        style={{ transform: `translateX(-${activeIndex * 100}%)` }}
+      >
+        {featurePanels.map((feature, index) => (
+          <div className={styles.carouselSlide} key={feature.title}>
+            <article className={styles.featurePanel}>
+              <div className={styles.featureCopy}>
+                <div className={styles.featureIcon}>
+                  <feature.icon size={22} />
+                </div>
+                <span>{feature.eyebrow}</span>
+                <h3>{feature.title}</h3>
+                <p>{feature.copy}</p>
+                <div className={styles.featureBullets}>
+                  {feature.bullets.map((bullet) => (
+                    <em key={bullet}>
+                      <Check size={14} />
+                      {bullet}
+                    </em>
+                  ))}
+                </div>
+              </div>
+              <div className={styles.featureVisual}>
+                {index === 0 ? (
+                  <FeatureNotesCascade />
+                ) : index === 1 ? (
+                  <FeatureFlashcardDeck />
+                ) : index === 2 ? (
+                  <FeatureCheatSheetExtractor />
+                ) : index === 3 ? (
+                  <MiniMindMap />
+                ) : index === 4 ? (
+                  <FeatureAudioDebate />
+                ) : index === 5 ? (
+                  <FeatureChatEli5 />
+                ) : (
+                  <Image
+                    src={feature.image}
+                    alt={`${feature.eyebrow} preview`}
+                    width={900}
+                    height={620}
+                  />
+                )}
+              </div>
+            </article>
+          </div>
+        ))}
+      </div>
+      <div className={styles.carouselIndicators}>
+        {featurePanels.map((_, index) => (
+          <button
+            key={index}
+            className={`${styles.carouselDot} ${index === activeIndex ? styles.carouselDotActive : ""}`}
+            onClick={() => setActiveIndex(index)}
+            aria-label={`Go to slide ${index + 1}`}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function LandingPage() {
   const { isSignedIn } = useAuth();
   const [appModalOpen, setAppModalOpen] = useState(false);
@@ -1534,57 +1615,7 @@ export default function LandingPage() {
             <motion.span variants={revealItem}>Features</motion.span>
             <motion.h2 variants={revealItem}>Every artifact feels visual, alive, and useful.</motion.h2>
           </motion.div>
-          <div className={styles.featureStack}>
-            {featurePanels.map((feature, index) => (
-              <motion.article
-                className={styles.featurePanel}
-                key={feature.title}
-                initial={{ opacity: 0, y: 56, rotateX: 8, filter: "blur(14px)" }}
-                whileInView={{ opacity: 1, y: 0, rotateX: 0, filter: "blur(0px)" }}
-                viewport={{ once: true, margin: "-120px" }}
-                transition={{ duration: 0.8, delay: index * 0.04, ease: "easeOut" }}
-              >
-                <div className={styles.featureCopy}>
-                  <div className={styles.featureIcon}>
-                    <feature.icon size={22} />
-                  </div>
-                  <span>{feature.eyebrow}</span>
-                  <h3>{feature.title}</h3>
-                  <p>{feature.copy}</p>
-                  <div className={styles.featureBullets}>
-                    {feature.bullets.map((bullet) => (
-                      <em key={bullet}>
-                        <Check size={14} />
-                        {bullet}
-                      </em>
-                    ))}
-                  </div>
-                </div>
-                <div className={styles.featureVisual}>
-                  {index === 0 ? (
-                    <FeatureNotesCascade />
-                  ) : index === 1 ? (
-                    <FeatureFlashcardDeck />
-                  ) : index === 2 ? (
-                    <FeatureCheatSheetExtractor />
-                  ) : index === 3 ? (
-                    <MiniMindMap />
-                  ) : index === 4 ? (
-                    <FeatureAudioDebate />
-                  ) : index === 5 ? (
-                    <FeatureChatEli5 />
-                  ) : (
-                    <Image
-                      src={feature.image}
-                      alt={`${feature.eyebrow} preview`}
-                      width={900}
-                      height={620}
-                    />
-                  )}
-                </div>
-              </motion.article>
-            ))}
-          </div>
+          <FeatureCarousel />
         </section>
 
         <section className={styles.demo} id="demo">

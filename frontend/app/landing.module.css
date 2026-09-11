@@ -8981,3 +8981,61 @@
     margin: 0;
   }
 }
+
+/* Horizontal Feature Carousel Styles */
+.featureCarousel {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  margin-top: 2rem;
+}
+
+.carouselTrack {
+  display: flex;
+  transition: transform 0.6s cubic-bezier(0.25, 1, 0.5, 1);
+  will-change: transform;
+}
+
+.carouselSlide {
+  flex: 0 0 100%;
+  width: 100%;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+.carouselIndicators {
+  display: flex;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 1rem 0 2rem;
+}
+
+.carouselDot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.2);
+  border: none;
+  cursor: pointer;
+  transition: background 0.3s ease, transform 0.3s ease;
+}
+
+.carouselDot:hover {
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.carouselDotActive {
+  background: #fff;
+  transform: scale(1.2);
+}
+
+.carouselSlide .featurePanel {
+  margin: 0 !important;
+  box-shadow: none !important;
+  border: none !important;
+  background: transparent !important;
+  padding: 2rem !important;
+}
