@@ -348,7 +348,7 @@ const NoteApp = () => {
   const [noteTitle, setNoteTitle] = useState("");
   const [isHandwritten, setIsHandwritten] = useState(false);
 
-  const [noteTheme, setNoteTheme] = useState<"dark" | "light">("dark");
+  const [noteTheme, setNoteTheme] = useState<"dark" | "light">("light");
   const [isArtifactConsoleOpen, setIsArtifactConsoleOpen] = useState(true);
   const [activeArtifact, setActiveArtifact] = useState<WorkspaceArtifact | null>(null);
   const [fullscreenArtifact, setFullscreenArtifact] = useState<WorkspaceArtifact | null>(null);
@@ -547,7 +547,13 @@ const NoteApp = () => {
       setNoteTitle(data.title);
       setCurrentNoteId(data.id);
       setActiveArtifact(null);
-      setIsArtifactConsoleOpen(true);
+      
+      if (typeof window !== 'undefined' && window.innerWidth <= 768) {
+        setIsArtifactConsoleOpen(false);
+      } else {
+        setIsArtifactConsoleOpen(true);
+      }
+    
       setFullscreenArtifact(null);
       setCurrentView(targetView);
     } catch (e) {
@@ -577,9 +583,15 @@ const NoteApp = () => {
         setCurrentNoteId(snapshot.currentNoteId ?? null);
         setCurrentView(snapshot.currentView || "home");
         setActiveArtifact(snapshot.activeArtifact ?? null);
-        setIsArtifactConsoleOpen(snapshot.isArtifactConsoleOpen ?? true);
+        
+        if (typeof window !== 'undefined' && window.innerWidth <= 768) {
+          setIsArtifactConsoleOpen(false);
+        } else {
+          setIsArtifactConsoleOpen(snapshot.isArtifactConsoleOpen ?? true);
+        }
+    
         setIsHandwritten(snapshot.isHandwritten || false);
-        setNoteTheme(snapshot.noteTheme || "dark");
+        setNoteTheme(snapshot.noteTheme || "light");
 
         if (snapshot.currentNoteId && !snapshot.markdown) {
           void loadNote(snapshot.currentNoteId, snapshot.currentView || "notebooks");
@@ -1919,6 +1931,25 @@ const NoteApp = () => {
           {markdown && (
             <div className={styles.studyWorkspace}>
               <div className={styles.notesStage}>
+                {/* Mobile Note Ribbon (Hidden on desktop) */}
+                <div className={${styles.mobileNoteRibbon} no-print}>
+                  <button className={${styles.ribbonBtn} } onClick={() => setIsHandwritten(!isHandwritten)}>
+                    <PenTool size={14} /> Handwritten
+                  </button>
+                  <button className={styles.ribbonBtn} onClick={() => setNoteTheme(noteTheme === 'dark' ? 'light' : 'dark')}>
+                    {noteTheme === 'dark' ? <Sun size={14} /> : <Moon size={14} />} {noteTheme === 'dark' ? "Light Mode" : "Dark Mode"}
+                  </button>
+                  <button className={styles.ribbonBtn} onClick={confirmExport}>
+                    <Download size={14} /> Export
+                  </button>
+                  <button className={styles.ribbonBtn} onClick={() => openArtifact("chat")}>
+                    <MessageCircle size={14} /> Ask
+                  </button>
+                  <button className={styles.ribbonBtn} onClick={() => openArtifact("source")} disabled={!videoSrc}>
+                    <Play size={14} /> Video
+                  </button>
+                </div>
+
                 {currentView === 'home' && (
                   <div className={`${styles.workspaceTopActions} no-print`}>
                     <button className={styles.workspaceActionBtn} onClick={saveCurrentNote} disabled={isSaving}>

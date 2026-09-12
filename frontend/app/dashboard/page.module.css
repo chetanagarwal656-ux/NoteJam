@@ -4693,3 +4693,74 @@
     font-size: 0.75rem !important;
   }
 }
+
+
+/* --- Mobile Ribbon & Edge-to-Edge Fixes --- */
+.mobileNoteRibbon {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  /* Hide the format and utility sections from the main artifact console on mobile */
+  .noteFormatPanel, .consoleUtilityGrid {
+    display: none !important;
+  }
+
+  /* Show the new ribbon inside notesStage */
+  .mobileNoteRibbon {
+    display: flex;
+    flex-direction: row;
+    overflow-x: auto;
+    gap: 0.5rem;
+    padding: 0.75rem 1rem;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    -webkit-overflow-scrolling: touch;
+    white-space: nowrap;
+    scrollbar-width: none; /* Firefox */
+  }
+  .mobileNoteRibbon::-webkit-scrollbar {
+    display: none; /* Chrome/Safari */
+  }
+
+  .ribbonBtn {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.4rem 0.75rem;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 99px;
+    color: var(--fg);
+    font-size: 0.85rem;
+    font-weight: 500;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  
+  .ribbonBtnActive {
+    background: rgba(56, 189, 248, 0.15);
+    color: #38bdf8;
+    border-color: rgba(56, 189, 248, 0.3);
+  }
+
+  /* Remove A4 Layout and go Edge-to-Edge */
+  .workspaceWrapper {
+    padding: 0 !important;
+    background: transparent !important;
+    width: 100vw !important;
+    max-width: 100vw !important;
+    margin: 0 !important;
+  }
+
+  .markdown {
+    padding: 1rem !important;
+    margin: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    border: none !important;
+    background: transparent !important; /* Let the theme handle the background */
+  }
+}
